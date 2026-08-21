@@ -6,64 +6,80 @@
 
   const _XPD = window._XPD;
   const core = _XPD.core;
+  const dom = _XPD.dom;
 
-  // ── UI constants (Chinese literals, fix #11) ───────────────────────
+  function t(key, fallback) {
+    try {
+      return chrome.i18n?.getMessage(key) || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  // ── Localized UI constants ────────────────────────────────────────
 
   const MODE_LABELS = Object.freeze({
-    link: '链接引用',
-    embed: '内嵌图片',
-    zip: 'ZIP 打包',
+    link: t('mode_link', '链接引用'),
+    embed: t('mode_embed', '内嵌图片'),
+    zip: t('mode_zip', 'ZIP 打包'),
   });
 
   const MODE_DESCS = Object.freeze({
-    link: '图片会保留原始链接，生成的 Markdown 最轻量。',
-    embed: '图片压缩后以内嵌方式写入 Markdown，单文件保存更省心。',
-    zip: 'Markdown 和图片一起打包成 ZIP，适合完整离线归档。',
+    link: t('mode_link_desc', '图片会保留原始链接，生成的 Markdown 最轻量。'),
+    embed: t('mode_embed_desc', '图片压缩后以内嵌方式写入 Markdown，单文件保存更省心。'),
+    zip: t('mode_zip_desc', 'Markdown 和图片一起打包成 ZIP，适合完整离线归档。'),
   });
 
   const UI_TEXT = Object.freeze({
-    launcherTitle: 'X Markdown Exporter，拖动可移动',
-    title: 'X Markdown Exporter',
-    subtitle: '保存当前推文或 Note',
-    modeTitle: '导出模式',
-    checking: '检测中...',
-    ready: '可以下载当前内容',
-    unsupported: '请打开 X 推文详情页或 Note 页面',
-    notReady: '正在等待推文内容加载；如果一直不动，请刷新页面或重新打开详情页',
-    unsupportedTimeline: '时间线暂不直接导出；请点开某条推文详情页后再下载或复制',
-    unsupportedExplore: '探索页暂不直接导出；请打开一条推文详情页或 Note 页面',
-    unsupportedSearch: '搜索页暂不直接导出；请打开搜索结果里的某条推文详情页',
-    unsupportedProfile: '主页暂不直接导出；请打开一条推文详情页或 Note 页面',
-    unsupportedOther: '当前页面暂不支持导出；请打开 X 推文详情页或 Note 页面',
-    note: '默认会附带作者和时间。',
-    download: '下载',
-    processing: '处理中...',
-    refresh: '刷新',
-    refreshLoading: '正在刷新页面...',
-    progressDefault: '正在提取内容...',
-    downloadSuccess: '下载成功',
-    downloadFailed: '下载失败',
-    copy: '复制',
-    copySuccess: '已复制 Markdown',
-    copyFailed: '复制失败',
-    close: '关闭',
+    launcherTitle: t('launcher_title', 'X Markdown Exporter，拖动可移动'),
+    title: t('extension_name', 'X Markdown Exporter'),
+    subtitle: t('panel_subtitle', '保存当前推文或 Note'),
+    modeTitle: t('download_format', '导出模式'),
+    checking: t('checking', '检测中...'),
+    ready: t('ready', '可以下载当前内容'),
+    unsupported: t('unsupported', '请打开 X 推文详情页或 Note 页面'),
+    notReady: t('not_ready', '正在等待推文内容加载；如果一直不动，请刷新页面或重新打开详情页'),
+    unsupportedTimeline: t('unsupported_timeline', '时间线暂不直接导出；请点开某条推文详情页后再下载或复制'),
+    unsupportedExplore: t('unsupported_explore', '探索页暂不直接导出；请打开一条推文详情页或 Note 页面'),
+    unsupportedSearch: t('unsupported_search', '搜索页暂不直接导出；请打开搜索结果里的某条推文详情页'),
+    unsupportedProfile: t('unsupported_profile', '主页暂不直接导出；请打开一条推文详情页或 Note 页面'),
+    unsupportedOther: t('unsupported_other', '当前页面暂不支持导出；请打开 X 推文详情页或 Note 页面'),
+    note: t('metadata_note', '默认会附带作者和时间。'),
+    download: t('download', '下载'),
+    processing: t('processing', '处理中...'),
+    refresh: t('refresh', '刷新'),
+    refreshLoading: t('refresh_loading', '正在刷新页面...'),
+    progressDefault: t('progress_extracting', '正在提取内容...'),
+    downloadSuccess: t('download_success', '下载成功'),
+    downloadWarning: t('download_warning', '下载已完成，但部分资源未能离线保存'),
+    downloadFailed: t('download_failed', '下载失败'),
+    copy: t('copy', '复制'),
+    copySuccess: t('copy_success', '已复制 Markdown'),
+    copyFailed: t('copy_failed', '复制失败'),
+    cancel: t('cancel', '取消'),
+    cancelling: t('export_cancelling', '正在取消导出...'),
+    cancelled: t('export_cancelled', '导出已取消'),
+    diagnostics: t('diagnostics_copy', '复制诊断报告'),
+    diagnosticsCopied: t('diagnostics_copied', '诊断报告已复制'),
+    diagnosticsFailed: t('diagnostics_failed', '诊断报告复制失败'),
+    close: t('close', '关闭'),
   });
 
   const PAGE_KIND_LABELS = Object.freeze({
-    article: '文章',
-    tweet: '推文',
-    timeline: '时间线',
-    explore: '探索',
-    search: '搜索',
-    profile: '主页',
-    other: '其他',
+    article: t('kind_article', '文章'),
+    tweet: t('kind_tweet', '推文'),
+    timeline: t('kind_timeline', '时间线'),
+    explore: t('kind_explore', '探索'),
+    search: t('kind_search', '搜索'),
+    profile: t('kind_profile', '主页'),
+    other: t('kind_other', '其他'),
   });
 
   const CONTENT_TAG_LABELS = Object.freeze({
-    thread: '线程',
-    images: '图',
-    quote: '引用',
-    card: '外链',
+    thread: t('tag_thread', '线程'),
+    images: t('tag_images', '图'),
+    quote: t('tag_quote', '引用'),
+    card: t('tag_card', '外链'),
   });
 
   const FLOATING_TOP_STORAGE_KEY = 'xpd_float_top';
@@ -89,6 +105,9 @@
     closeBtn: null,
     progress: null,
     progressText: null,
+    progressBar: null,
+    cancelBtn: null,
+    diagnosticBtn: null,
     result: null,
     toast: null,
     currentMode: 'embed',
@@ -152,6 +171,9 @@
     uiState.closeBtn = root.querySelector('[data-role="closeBtn"]');
     uiState.progress = root.querySelector('[data-role="progress"]');
     uiState.progressText = root.querySelector('[data-role="progressText"]');
+    uiState.progressBar = root.querySelector('[data-role="progressBar"]');
+    uiState.cancelBtn = root.querySelector('[data-role="cancelBtn"]');
+    uiState.diagnosticBtn = root.querySelector('[data-role="diagnosticBtn"]');
     uiState.result = root.querySelector('[data-role="result"]');
     uiState.toast = root.querySelector('[data-role="toast"]');
 
@@ -163,13 +185,22 @@
     uiState.launcher.addEventListener('pointermove', handleLauncherPointerMove);
     uiState.launcher.addEventListener('pointerup', handleLauncherPointerEnd);
     uiState.launcher.addEventListener('pointercancel', handleLauncherPointerEnd);
-    uiState.closeBtn.addEventListener('click', () => setPanelOpen(false));
+    uiState.closeBtn.addEventListener('click', (event) => {
+      if (!event.isTrusted) return;
+      setPanelOpen(false);
+      uiState.launcher?.focus({ preventScroll: true });
+    });
     uiState.refreshBtn.addEventListener('click', handleRefreshClick);
     uiState.downloadBtn.addEventListener('click', handleFloatingDownload);
     uiState.copyBtn.addEventListener('click', handleFloatingCopy);
+    uiState.cancelBtn.addEventListener('click', handleCancelClick);
+    uiState.diagnosticBtn.addEventListener('click', handleDiagnosticClick);
 
     root.querySelectorAll('[data-mode]').forEach((button) => {
-      button.addEventListener('click', () => updateModeUi(button.dataset.mode));
+      button.addEventListener('click', (event) => {
+        if (!event.isTrusted) return;
+        updateModeUi(button.dataset.mode);
+      });
     });
 
     // Global listeners with AbortController (fix #9)
@@ -242,11 +273,11 @@
   function getFloatingUiMarkup() {
     const h = core.escapeHtml;
     return `
-      <section class="xpd-panel" data-role="panel" aria-hidden="true">
+      <section class="xpd-panel" id="xpd-export-panel" data-role="panel" role="dialog" aria-labelledby="xpd-panel-title" aria-hidden="true">
         <div class="xpd-panel__inner">
           <div class="xpd-header">
             <div>
-              <h2 class="xpd-header__title">${h(UI_TEXT.title)}</h2>
+              <h2 class="xpd-header__title" id="xpd-panel-title">${h(UI_TEXT.title)}</h2>
               <p class="xpd-header__meta">${h(UI_TEXT.subtitle)}</p>
             </div>
             <button class="xpd-close" data-role="closeBtn" type="button" aria-label="${h(UI_TEXT.close)}" title="${h(UI_TEXT.close)}">
@@ -255,17 +286,17 @@
               </svg>
             </button>
           </div>
-          <div class="xpd-status xpd-status--loading" data-role="status">
+          <div class="xpd-status xpd-status--loading" data-role="status" role="status" aria-live="polite">
             <span class="xpd-status__dot"></span>
             <span data-role="statusText">${h(UI_TEXT.checking)}</span>
             <span class="xpd-status__type" data-role="statusKind">${h(PAGE_KIND_LABELS.other)}</span>
           </div>
           <div class="xpd-mode-card">
             <div class="xpd-section-title">${h(UI_TEXT.modeTitle)}</div>
-            <div class="xpd-mode-selector">
-              <button class="xpd-mode-btn" data-mode="link" type="button">${h(MODE_LABELS.link)}</button>
-              <button class="xpd-mode-btn" data-mode="embed" type="button">${h(MODE_LABELS.embed)}</button>
-              <button class="xpd-mode-btn" data-mode="zip" type="button">${h(MODE_LABELS.zip)}</button>
+            <div class="xpd-mode-selector" role="group" aria-label="${h(UI_TEXT.modeTitle)}">
+              <button class="xpd-mode-btn" data-mode="link" type="button" aria-pressed="false">${h(MODE_LABELS.link)}</button>
+              <button class="xpd-mode-btn" data-mode="embed" type="button" aria-pressed="false">${h(MODE_LABELS.embed)}</button>
+              <button class="xpd-mode-btn" data-mode="zip" type="button" aria-pressed="false">${h(MODE_LABELS.zip)}</button>
             </div>
             <p class="xpd-mode-desc" data-role="modeDesc"></p>
           </div>
@@ -275,14 +306,19 @@
             <button class="xpd-btn xpd-btn--secondary" data-role="copyBtn" type="button">${h(UI_TEXT.copy)}</button>
             <button class="xpd-btn xpd-btn--secondary" data-role="refreshBtn" type="button">${h(UI_TEXT.refresh)}</button>
           </div>
-          <div class="xpd-progress" data-role="progress">
+          <div class="xpd-progress" data-role="progress" role="status" aria-live="polite">
             <span class="xpd-spinner" aria-hidden="true"></span>
-            <span data-role="progressText">${h(UI_TEXT.progressDefault)}</span>
+            <span class="xpd-progress__details">
+              <span data-role="progressText">${h(UI_TEXT.progressDefault)}</span>
+              <progress class="xpd-progress__bar" data-role="progressBar" max="1" value="0" hidden></progress>
+            </span>
+            <button class="xpd-progress__cancel" data-role="cancelBtn" type="button">${h(UI_TEXT.cancel)}</button>
           </div>
-          <div class="xpd-result" data-role="result"></div>
+          <button class="xpd-diagnostic" data-role="diagnosticBtn" type="button">${h(UI_TEXT.diagnostics)}</button>
+          <div class="xpd-result" data-role="result" role="status" aria-live="polite"></div>
         </div>
       </section>
-      <button class="xpd-launcher" data-role="launcher" type="button" aria-label="${h(UI_TEXT.launcherTitle)}" aria-expanded="false" title="${h(UI_TEXT.launcherTitle)}">
+      <button class="xpd-launcher" data-role="launcher" type="button" aria-label="${h(UI_TEXT.launcherTitle)}" aria-controls="xpd-export-panel" aria-expanded="false" title="${h(UI_TEXT.launcherTitle)}">
         <span class="xpd-launcher__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24">
             <path d="M12 3a1 1 0 0 1 1 1v8.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V4a1 1 0 0 1 1-1Zm-7 15a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z"></path>
@@ -290,7 +326,7 @@
         </span>
         <span class="xpd-launcher__badge" data-role="launcherBadge" data-state="loading"></span>
       </button>
-      <div class="xpd-toast" data-role="toast"></div>
+      <div class="xpd-toast" data-role="toast" role="status" aria-live="polite"></div>
     `;
   }
 
@@ -302,7 +338,9 @@
     saveMode(mode);
     if (uiState.root) {
       uiState.root.querySelectorAll('[data-mode]').forEach((button) => {
-        button.classList.toggle('xpd-active', button.dataset.mode === mode);
+        const active = button.dataset.mode === mode;
+        button.classList.toggle('xpd-active', active);
+        button.setAttribute('aria-pressed', String(active));
       });
     }
     if (uiState.modeDesc) {
@@ -316,7 +354,8 @@
     event.stopPropagation();
   }
 
-  function handleLauncherClick() {
+  function handleLauncherClick(event) {
+    if (!event?.isTrusted) return;
     if (Date.now() < uiState.suppressClickUntil) return;
     const nextOpen = !uiState.open;
     setPanelOpen(nextOpen);
@@ -324,6 +363,7 @@
   }
 
   function handleLauncherPointerDown(event) {
+    if (!event.isTrusted) return;
     if (event.button !== 0) return;
     uiState.dragPointerId = event.pointerId;
     uiState.dragStartX = event.clientX;
@@ -375,7 +415,10 @@
   }
 
   function handleDocumentKeydown(event) {
-    if (event.key === 'Escape' && uiState.open) setPanelOpen(false);
+    if (event.key === 'Escape' && uiState.open) {
+      setPanelOpen(false);
+      uiState.launcher?.focus({ preventScroll: true });
+    }
   }
 
   function handleVisibilityChange() {
@@ -389,12 +432,40 @@
     );
   }
 
-  function handleRefreshClick() {
+  function handleRefreshClick(event) {
+    if (!event?.isTrusted) return;
     setStatus('loading', UI_TEXT.refreshLoading);
     window.location.reload();
   }
 
-  async function handleFloatingDownload() {
+  function handleCancelClick(event) {
+    if (!event?.isTrusted) return;
+    const cancelled = _XPD.cancelActiveExport?.();
+    if (!cancelled) return;
+    if (uiState.cancelBtn) {
+      uiState.cancelBtn.disabled = true;
+      uiState.cancelBtn.textContent = UI_TEXT.cancelling;
+    }
+    updateProgressText(UI_TEXT.cancelling);
+  }
+
+  async function handleDiagnosticClick(event) {
+    if (!event?.isTrusted || uiState.busyCount > 0) return;
+    if (uiState.diagnosticBtn) uiState.diagnosticBtn.disabled = true;
+    try {
+      await _XPD.copyDiagnosticReport();
+      showResult('success', UI_TEXT.diagnosticsCopied);
+      showToast('success', UI_TEXT.diagnosticsCopied);
+    } catch {
+      showResult('error', UI_TEXT.diagnosticsFailed);
+      showToast('error', UI_TEXT.diagnosticsFailed);
+    } finally {
+      if (uiState.diagnosticBtn) uiState.diagnosticBtn.disabled = false;
+    }
+  }
+
+  async function handleFloatingDownload(event) {
+    if (!event?.isTrusted) return;
     const availability = refreshPanelStatus();
     if (!availability.ready) {
       showResult('error', availability.message);
@@ -408,26 +479,34 @@
         uiState.currentMode
       );
       if (response?.success) {
-        showResult('success', UI_TEXT.downloadSuccess);
-        showToast('success', UI_TEXT.downloadSuccess);
+        const type = response.warning ? 'warning' : 'success';
+        const message = response.warning
+          ? `${UI_TEXT.downloadWarning}：${response.warning}`
+          : UI_TEXT.downloadSuccess;
+        showResult(type, message);
+        showToast(type, message);
       } else {
         const message = response?.error || UI_TEXT.downloadFailed;
         showResult('error', message);
         showToast('error', message);
       }
     } catch (error) {
-      const message = error?.message
-        ? `${UI_TEXT.downloadFailed}: ${error.message}`
-        : UI_TEXT.downloadFailed;
-      showResult('error', message);
-      showToast('error', message);
+      const cancelled = error?.code === 'EXPORT_CANCELLED' || error?.name === 'AbortError';
+      const message = cancelled
+        ? UI_TEXT.cancelled
+        : error?.message
+          ? `${UI_TEXT.downloadFailed}: ${error.message}`
+          : UI_TEXT.downloadFailed;
+      showResult(cancelled ? 'warning' : 'error', message);
+      showToast(cancelled ? 'warning' : 'error', message);
     } finally {
       endUiWork();
       refreshPanelStatus();
     }
   }
 
-  async function handleFloatingCopy() {
+  async function handleFloatingCopy(event) {
+    if (!event?.isTrusted) return;
     const availability = refreshPanelStatus();
     if (!availability.ready) {
       showResult('error', availability.message);
@@ -448,9 +527,12 @@
         showToast('error', message);
       }
     } catch (error) {
-      const message = error?.message ? `${UI_TEXT.copyFailed}: ${error.message}` : UI_TEXT.copyFailed;
-      showResult('error', message);
-      showToast('error', message);
+      const cancelled = error?.code === 'EXPORT_CANCELLED' || error?.name === 'AbortError';
+      const message = cancelled
+        ? UI_TEXT.cancelled
+        : error?.message ? `${UI_TEXT.copyFailed}: ${error.message}` : UI_TEXT.copyFailed;
+      showResult(cancelled ? 'warning' : 'error', message);
+      showToast(cancelled ? 'warning' : 'error', message);
     } finally {
       endUiWork();
       refreshPanelStatus();
@@ -471,6 +553,7 @@
           { top: uiState.floatingTop, right: uiState.floatingRight },
           { persist: false, includePanel: true }
         );
+        uiState.closeBtn?.focus({ preventScroll: true });
       });
     }
   }
@@ -485,7 +568,7 @@
 
   function endUiWork() {
     uiState.busyCount = Math.max(0, uiState.busyCount - 1);
-    if (uiState.busyCount === 0) updateProgressText(UI_TEXT.progressDefault);
+    if (uiState.busyCount === 0) updateProgressText(UI_TEXT.progressDefault, null);
     syncUiControls();
   }
 
@@ -499,12 +582,30 @@
       uiState.copyBtn.disabled = isBusy || !uiState.ready;
       uiState.copyBtn.textContent = UI_TEXT.copy;
     }
+    if (uiState.cancelBtn) {
+      uiState.cancelBtn.disabled = !isBusy;
+      uiState.cancelBtn.textContent = UI_TEXT.cancel;
+    }
+    if (uiState.diagnosticBtn) uiState.diagnosticBtn.disabled = isBusy;
     if (uiState.progress) uiState.progress.classList.toggle('xpd-show', isBusy);
     if (uiState.launcher) uiState.launcher.classList.toggle('xpd-busy', isBusy);
   }
 
-  function updateProgressText(text) {
+  function updateProgressText(text, progress = null) {
     if (uiState.progressText) uiState.progressText.textContent = text || UI_TEXT.progressDefault;
+    if (uiState.progressBar) {
+      const completed = Number(progress?.completed);
+      const total = Number(progress?.total);
+      const determinate = Number.isFinite(completed) && Number.isFinite(total) && total > 0;
+      uiState.progressBar.hidden = !determinate;
+      if (determinate) {
+        uiState.progressBar.max = total;
+        uiState.progressBar.value = Math.min(Math.max(completed, 0), total);
+        uiState.progressBar.setAttribute('aria-label', `${completed}/${total}`);
+      } else {
+        uiState.progressBar.removeAttribute('aria-label');
+      }
+    }
   }
 
   function showResult(type, text) {
@@ -540,8 +641,9 @@
   // ── Status management ──────────────────────────────────────────────
 
   function getPageKind() {
-    if (core.detectArticlePage()) return 'article';
-    if (core.POST_DETAIL_URL_RE.test(window.location.href)) return 'tweet';
+    const route = core.classifyPageRoute();
+    if (route.kind === 'article') return 'article';
+    if (route.kind === 'tweet') return core.detectArticlePage() ? 'article' : 'tweet';
     try {
       const pathname = new URL(window.location.href).pathname.replace(/\/+$/, '') || '/';
       if (pathname === '/home' || pathname.startsWith('/i/timeline')) return 'timeline';
@@ -567,14 +669,12 @@
   }
 
   function getTopLevelTweetArticles(root = document) {
-    return Array.from(root.querySelectorAll('article[data-testid="tweet"]')).filter(
-      (article) => !article.parentElement?.closest('article[data-testid="tweet"]')
-    );
+    return dom.topLevelTweets(root);
   }
 
   function collectTweetMediaImageUrls(root, urls) {
     if (!(root instanceof Element || root instanceof Document)) return urls;
-    root.querySelectorAll('img[src*="pbs.twimg.com/media"]').forEach((img) => {
+    root.querySelectorAll(dom.css.mediaImage).forEach((img) => {
       const src = img.getAttribute('src') || img.src || '';
       if (!src || src.includes('profile_images') || src.includes('emoji') || src.includes('icon')) {
         return;
@@ -590,30 +690,30 @@
 
   function countArticleMediaImages() {
     const urls = new Set();
-    const containers = document.querySelectorAll(
-      '[data-testid="article-content"], [data-testid="noteContent"], [data-testid="richTextContainer"]'
-    );
+    const containers = document.querySelectorAll(dom.css.articleContent);
     if (containers.length > 0) {
       containers.forEach((container) => collectTweetMediaImageUrls(container, urls));
       return urls.size;
     }
-    const primaryColumn = document.querySelector('[data-testid="primaryColumn"]');
+    const primaryColumn = document.querySelector(dom.css.primaryColumn);
     collectTweetMediaImageUrls(primaryColumn || document, urls);
     return urls.size;
   }
 
   function hasQuotedTweet(mainTweetEl) {
-    return Boolean(mainTweetEl?.querySelector('article[data-testid="tweet"]'));
+    return Boolean(mainTweetEl?.querySelector(dom.css.tweetArticle));
   }
 
   function hasPreviewCard(mainTweetEl) {
     if (!(mainTweetEl instanceof Element)) return false;
-    return Array.from(mainTweetEl.querySelectorAll('a[href], [data-testid*="card"]')).some((el) => {
-      if (el.closest?.('[data-testid="tweetText"]')) return false;
-      if (el.closest?.('[data-testid="User-Name"]')) return false;
-      if (el.closest?.('[role="group"][id]')) return false;
+    return Array.from(mainTweetEl.querySelectorAll(`a[href], ${dom.css.cardMarker}`)).some((el) => {
+      if (el.closest?.(dom.css.tweetText)) return false;
+      if (el.closest?.(dom.css.author)) return false;
+      if (el.closest?.(dom.css.actionGroup)) return false;
       if (el.querySelector?.('time')) return false;
-      const isCardMarked = el.getAttribute?.('data-testid')?.toLowerCase().includes('card');
+      const isCardMarked = el.getAttribute?.(dom.attributes.testId)
+        ?.toLowerCase()
+        .includes(dom.tokens.card);
       const href = el.getAttribute?.('href') || '';
       const normalizedHref = core.normalizeAnchorUrl(href);
       if (/\/(status\/\d+|photo\/\d+|video\/\d+)/i.test(normalizedHref)) {
@@ -682,6 +782,15 @@
     const kindLabel = PAGE_KIND_LABELS[kind] || PAGE_KIND_LABELS.other;
 
     if (kind === 'article') {
+      if (!core.detectArticlePage()) {
+        return {
+          ready: false,
+          loading: true,
+          kind,
+          kindLabel,
+          message: UI_TEXT.notReady,
+        };
+      }
       return {
         ready: true,
         loading: false,

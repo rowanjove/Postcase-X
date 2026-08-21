@@ -1,17 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "X Markdown Exporter",
-  "version": "1.6.1",
-  "description": "Copy and archive X (Twitter) posts, threads, and notes as Markdown for AI tools and local knowledge workflows.",
+  "name": "__MSG_extension_name__",
+  "version": "1.7.0",
+  "description": "__MSG_extension_description__",
+  "default_locale": "en",
   "permissions": [
-    "activeTab",
     "storage"
   ],
   "host_permissions": [
     "https://x.com/*",
     "https://twitter.com/*",
-    "https://pbs.twimg.com/*",
-    "https://abs.twimg.com/*"
+    "https://pbs.twimg.com/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'"
@@ -30,6 +29,7 @@
       ],
       "js": [
         "jszip.min.js",
+        "content-selectors.js",
         "content-core.js",
         "content-export.js",
         "content-ui.js",
@@ -49,7 +49,7 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "X Markdown Exporter",
+    "default_title": "__MSG_extension_name__",
     "default_popup": "popup.html"
   }
 }

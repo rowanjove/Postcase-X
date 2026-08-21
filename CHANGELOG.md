@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.7.0 (2026-08-22)
+
+- Hardened page classification and added support for `/i/web/status/{id}` URLs.
+- Changed tweet and thread extraction to fail closed when the target or author cannot be verified.
+- Escaped untrusted Markdown/HTML text and narrowed image placeholder replacement.
+- Added trusted-event checks for the injected page UI and aligned the privacy policy with local readiness checks.
+- Added image fetch limits, redirect/MIME validation, original-format ZIP storage, embed safeguards, and partial-export warnings.
+- Added Node regression tests, CI, reproducible release packaging, accessibility improvements, and minimum-permission checks.
+- Added English and Simplified Chinese `chrome.i18n` resources for the manifest, popup, injected panel, progress/error messages, filenames, and Markdown metadata.
+- Added an anonymized real-browser DOM fixture covering panel readiness, mode selection, Markdown copy, and Blob-backed download orchestration.
+- Replaced indexed `__IMG_n__` string markers with structured content nodes for text, links, images, headings, cards, and quoted posts.
+- Added a versioned `PostDocument` model so DOM extraction is separated from Markdown rendering across copy, link, embed, and ZIP exports.
+- Added a three-request image concurrency limit, cancellable background fetches, cancel controls in both interfaces, and determinate image progress for embed/ZIP exports.
+- Centralized X DOM selectors in a versioned adapter and added a user-triggered, privacy-safe local diagnostic report.
+- Added five Playwright browser tests to CI for copy, diagnostics, embed progress, cancellation, ZIP export, and a real packaged MV3 extension install/injection/download flow with its service worker and popup.
+- Added release metadata validation, byte-for-byte ZIP verification, deterministic archive timestamps, and SHA-256 sidecars.
+
 ## v1.6.1
 
 ### 中文

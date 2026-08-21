@@ -1,0 +1,21 @@
+[
+  "manifest.json",
+  "background.js",
+  "content-selectors.js",
+  "content-core.js",
+  "content-export.js",
+  "content-ui.js",
+  "content.js",
+  "content.css",
+  "popup.html",
+  "popup.js",
+  "jszip.min.js",
+  "LICENSE",
+  "README.md",
+  "PRIVACY.md",
+  "CHANGELOG.md",
+  "IMPROVEMENT_PLAN.md",
+  "_locales",
+  "icons",
+  "assets"
+]

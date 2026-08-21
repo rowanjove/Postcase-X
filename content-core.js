@@ -5,18 +5,27 @@
   'use strict';
 
   const _XPD = (window._XPD = window._XPD || {});
+  const dom = _XPD.dom;
+  if (!dom) throw new Error('XPD DOM selector adapter is not loaded');
+
+  function t(key, fallback) {
+    try {
+      return chrome.i18n?.getMessage(key) || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  _XPD.t = t;
 
   // ── Constants ──────────────────────────────────────────────────────
 
   const MAX_IMAGE_WIDTH = 1200;
   const JPEG_QUALITY = 0.7;
   const POST_DETAIL_URL_RE =
-    /^https:\/\/(x\.com|twitter\.com)\/[^/]+\/(status|i\/web\/status)\/\d+/i;
+    /^https:\/\/(?:x\.com|twitter\.com)\/(?:[^/]+\/status|i\/web\/status)\/\d+(?:[/?#]|$)/i;
+  const ARTICLE_DETAIL_PATH_RE = /^\/i\/(?:article|notes?)\/\d+(?:\/|$)/i;
   const GITHUB_ISSUES_URL = 'https://github.com/rowanjove/x-markdown-exporter/issues';
-  const ARTICLE_CONTENT_SELECTOR =
-    '[data-testid="article-content"], ' +
-    '[data-testid="noteContent"], ' +
-    '[data-testid="richTextContainer"]';
 
   // ── Escaping helpers ───────────────────────────────────────────────
 
@@ -30,29 +39,34 @@
   }
 
   function escapeMarkdownText(text) {
-    return (text || '')
+    return String(text || '')
       .replace(/\\/g, '\\\\')
-      .replace(/([*_`~\[\]<>])/g, '\\$1');
+      .replace(/([*_`~\[\]<>#!|])/g, '\\$1')
+      .replace(/^(\s*)([-+=])(?=(?:\s|[-+=]))/gm, '$1\\$2')
+      .replace(/^(\s*)(\d+)\.(?=\s)/gm, '$1$2\\.');
   }
 
   function escapeMarkdownLinkLabel(text) {
-    return (text || 'Link')
-      .replace(/\\/g, '\\\\')
-      .replace(/\[/g, '\\[')
-      .replace(/\]/g, '\\]')
-      .replace(/\r?\n/g, ' ');
+    return escapeMarkdownText(text || 'Link').replace(/\r?\n/g, ' ');
+  }
+
+  function escapeMarkdownUrl(url) {
+    return String(url || '')
+      .replace(/[\r\n]/g, '')
+      .replace(/</g, '%3C')
+      .replace(/>/g, '%3E');
   }
 
   // ── Text stripping ────────────────────────────────────────────────
 
   function stripImageMarkdown(text) {
     return (text || '')
-      .replace(/!\[[^\]]*\]\(__IMG_\d+__\)/g, '\n')
       .replace(/!\[[^\]]*\]\([^)]+\)/g, '\n');
   }
 
   function stripMarkdownSyntax(text) {
     return (text || '')
+      .replace(/\\([\\*_`~\[\]<>#!|])/g, '$1')
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
       .replace(/^#{1,6}\s+/gm, '')
       .replace(/^>\s?/gm, '')
@@ -104,6 +118,27 @@
     return '';
   }
 
+  function classifyPageRoute(href = window.location.href) {
+    try {
+      const parsed = new URL(href);
+      const hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+      if (hostname !== 'x.com' && hostname !== 'twitter.com') {
+        return { kind: 'other', statusId: null };
+      }
+
+      const statusMatch = parsed.pathname.match(
+        /^\/(?:[^/]+\/status|i\/web\/status)\/(\d+)(?:\/|$)/i
+      );
+      if (statusMatch) return { kind: 'tweet', statusId: statusMatch[1] };
+      if (ARTICLE_DETAIL_PATH_RE.test(parsed.pathname)) {
+        return { kind: 'article', statusId: null };
+      }
+      return { kind: 'other', statusId: null };
+    } catch {
+      return { kind: 'other', statusId: null };
+    }
+  }
+
   function getSourceUrl(href = window.location.href) {
     try {
       const parsed = new URL(href);
@@ -125,44 +160,86 @@
     return stripMarkdownSyntax(stripImageMarkdown(text || '')).length > 0;
   }
 
-  function buildExtractionRetryHint(pageLabel) {
-    if (pageLabel === '推文') return '请先打开推文详情页后重试';
-    if (pageLabel === 'Note 页面') return '请先打开 Note 页面后重试';
-    return '请刷新页面后重试';
+  function inlineNodesToPlainText(inlines) {
+    return (inlines || []).map((inline) => {
+      if (inline?.type === 'text') return inline.text || '';
+      if (inline?.type === 'link') return inline.label || '';
+      if (inline?.type === 'image') return inline.alt || '';
+      return '';
+    }).join('');
   }
 
-  function buildExtractionFailureMessage(pageLabel) {
-    const retryHint = buildExtractionRetryHint(pageLabel);
-    return `${pageLabel}内容提取为空，可能是 X 页面结构已更新。${retryHint}；如果仍然失败，请到 GitHub 提 Issue: ${GITHUB_ISSUES_URL}`;
+  function contentBlocksToPlainText(blocks) {
+    return (blocks || []).map((block) => {
+      if (!block) return '';
+      if (block.type === 'paragraph' || block.type === 'heading' ||
+          block.type === 'listItem' || block.type === 'blockquote') {
+        return inlineNodesToPlainText(block.inlines);
+      }
+      if (block.type === 'card') {
+        return [block.title, block.summary, block.domain].filter(Boolean).join(' ');
+      }
+      if (block.type === 'quote') return contentBlocksToPlainText(block.blocks);
+      return '';
+    }).filter(Boolean).join('\n');
   }
 
-  function validateExtracted(result, pageLabel = '当前页面') {
-    const text = result?.text ?? result?.t ?? '';
-    const images = result?.images ?? result?.imgs ?? [];
-    const hasText = hasMeaningfulExtractedText(text);
+  function hasMeaningfulContentBlocks(blocks) {
+    if (contentBlocksToPlainText(blocks).trim()) return true;
+    return (blocks || []).some((block) => {
+      if (block?.type === 'image' || block?.type === 'card') return true;
+      if (block?.type === 'quote') return hasMeaningfulContentBlocks(block.blocks);
+      return (block?.inlines || []).some((inline) => inline?.type === 'image');
+    });
+  }
+
+  function deriveTitleFromBlocks(blocks) {
+    return deriveTitleText(contentBlocksToPlainText(blocks));
+  }
+
+  function buildExtractionRetryHint(pageKind) {
+    if (pageKind === 'tweet') return t('retry_tweet', '请先打开推文详情页后重试');
+    if (pageKind === 'note') return t('retry_note', '请先打开 Note 页面后重试');
+    return t('retry_page', '请刷新页面后重试');
+  }
+
+  function buildExtractionFailureMessage(pageKind) {
+    const pageLabel = pageKind === 'tweet'
+      ? t('kind_tweet', '推文')
+      : pageKind === 'note'
+        ? t('label_note_page', 'Note 页面')
+        : t('label_current_page', '当前页面');
+    const retryHint = buildExtractionRetryHint(pageKind);
+    return `${pageLabel}${t('extraction_empty', '内容提取为空，可能是 X 页面结构已更新。')}${retryHint}；${t('issue_if_persistent', '如果仍然失败，请到 GitHub 提 Issue:')} ${GITHUB_ISSUES_URL}`;
+  }
+
+  function validateExtracted(result, pageKind = 'page') {
+    const text = result?.text ?? '';
+    const images = result?.images ?? [];
+    const hasText = Array.isArray(result?.blocks)
+      ? hasMeaningfulContentBlocks(result.blocks)
+      : hasMeaningfulExtractedText(text);
     const hasMedia = Array.isArray(images) && images.length > 0;
 
     if (!hasText && !hasMedia) {
-      throw new ExtractionError('DOM_EMPTY', buildExtractionFailureMessage(pageLabel));
+      throw new ExtractionError('DOM_EMPTY', buildExtractionFailureMessage(pageKind));
     }
   }
 
   function getArticleContainers(root = document) {
-    return root.querySelectorAll(ARTICLE_CONTENT_SELECTOR);
+    return dom.articleContainers(root);
   }
 
   function getTopLevelTweetArticles(root = document) {
-    return Array.from(root.querySelectorAll('article[data-testid="tweet"]')).filter(
-      (article) => !article.parentElement?.closest('article[data-testid="tweet"]')
-    );
+    return dom.topLevelTweets(root);
   }
 
   function isTweetMediaImage(src) {
     return Boolean(src && src.includes('pbs.twimg.com/media'));
   }
 
-  function appendImagePlaceholder(src, imageState) {
-    if (!imageState || !isTweetMediaImage(src)) return '';
+  function createImageNode(src, imageState, alt = '') {
+    if (!imageState || !isTweetMediaImage(src)) return null;
 
     let nextSrc = src;
     if (
@@ -170,25 +247,21 @@
       nextSrc.includes('emoji') ||
       nextSrc.includes('icon')
     ) {
-      return '';
+      return null;
     }
 
     nextSrc = upgradeImageUrl(nextSrc);
-    if (imageState.imageSet.has(nextSrc)) return '';
+    if (imageState.imageSet.has(nextSrc)) return null;
 
     imageState.imageSet.add(nextSrc);
     imageState.images.push(nextSrc);
-
-    const placeholder = `\n\n![图片${imageState.imgIndex + 1}](__IMG_${imageState.imgIndex}__)\n\n`;
+    const imageNode = {
+      type: 'image',
+      url: nextSrc,
+      alt: alt || `${t('md_image', '图片')}${imageState.imgIndex + 1}`,
+    };
     imageState.imgIndex += 1;
-    return placeholder;
-  }
-
-  function prefixMarkdownLines(text, prefix) {
-    return (text || '')
-      .split('\n')
-      .map((line) => `${prefix}${line}`)
-      .join('\n');
+    return imageNode;
   }
 
   // ── Link card helpers ──────────────────────────────────────────────
@@ -261,9 +334,9 @@
 
   function isPreviewCardAnchor(anchor) {
     if (!(anchor instanceof Element)) return false;
-    if (anchor.closest('[data-testid="tweetText"]')) return false;
-    if (anchor.closest('[data-testid="User-Name"]')) return false;
-    if (anchor.closest('[role="group"][id]')) return false;
+    if (anchor.closest(dom.css.tweetText)) return false;
+    if (anchor.closest(dom.css.author)) return false;
+    if (anchor.closest(dom.css.actionGroup)) return false;
     if (anchor.querySelector('time')) return false;
 
     const rawHref = anchor.getAttribute('href') || anchor.href || '';
@@ -273,16 +346,16 @@
     const texts = collectPreviewCardTexts(anchor);
     const hasMedia = Boolean(anchor.querySelector('img, video'));
     const hasCardMarker =
-      anchor.matches('[data-testid*="card"]') ||
-      Boolean(anchor.querySelector('[data-testid*="card"]'));
+      anchor.matches(dom.css.cardMarker) ||
+      Boolean(anchor.querySelector(dom.css.cardMarker));
     const hasEnoughText = texts.join(' ').length >= 18;
     return hasCardMarker || hasMedia || texts.length >= 2 || hasEnoughText;
   }
 
-  function buildPreviewCardMarkdown(anchor, seenCardLinks) {
-    if (!isPreviewCardAnchor(anchor)) return '';
+  function extractPreviewCard(anchor, seenCardLinks) {
+    if (!isPreviewCardAnchor(anchor)) return null;
     const url = normalizeAnchorUrl(anchor.getAttribute('href') || anchor.href || '');
-    if (!url || seenCardLinks.has(url)) return '';
+    if (!url || seenCardLinks.has(url)) return null;
     seenCardLinks.add(url);
 
     const texts = collectPreviewCardTexts(anchor);
@@ -294,57 +367,69 @@
       texts.find((t) => t !== title && !isLikelyDomainText(t))
     );
 
-    let markdown = `[${escapeMarkdownLinkLabel(title)}](<${url}>)`;
-    if (summary) markdown += `\n> ${summary}`;
-    if (domain && domain !== title && domain !== summary) markdown += `\n> ${domain}`;
-    return markdown;
+    return { type: 'card', url, title, summary, domain };
   }
 
   // ── DOM text walking ───────────────────────────────────────────────
 
-  function walkTextNode(el, imageState) {
-    if (!el) return '';
-    let text = '';
+  function appendInlineNode(inlines, node) {
+    if (!node) return;
+    if (node.type === 'text' && !node.text) return;
+    const previous = inlines[inlines.length - 1];
+    if (node.type === 'text' && previous?.type === 'text') {
+      previous.text += node.text;
+      return;
+    }
+    inlines.push(node);
+  }
+
+  function extractInlineNodes(el, imageState) {
+    if (!el) return [];
+    const inlines = [];
 
     const walk = (node) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        text += node.textContent;
+        appendInlineNode(inlines, { type: 'text', text: node.textContent || '' });
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
       const tag = node.tagName.toLowerCase();
 
       if (tag === 'br') {
-        text += '\n';
+        appendInlineNode(inlines, { type: 'text', text: '\n' });
         return;
       }
       if (tag === 'a') {
         const href = node.getAttribute('href') || '';
-        const linkText = escapeMarkdownLinkLabel(node.textContent.trim());
-        if (href.startsWith('http')) {
-          text += `[${linkText}](<${href}>)`;
-        } else if (href.startsWith('/')) {
-          text += `[${linkText}](<https://x.com${href}>)`;
+        const linkText = node.textContent.trim();
+        const normalizedUrl = normalizeAnchorUrl(href);
+        if (normalizedUrl) {
+          appendInlineNode(inlines, { type: 'link', label: linkText, url: normalizedUrl });
         } else {
-          text += node.textContent.trim();
+          appendInlineNode(inlines, { type: 'text', text: node.textContent.trim() });
         }
         return;
       }
       if (tag === 'img') {
-        const mediaPlaceholder = appendImagePlaceholder(node.getAttribute('src') || node.src, imageState);
-        if (mediaPlaceholder) {
-          text += mediaPlaceholder;
+        const alt = node.getAttribute('alt') || '';
+        const imageNode = createImageNode(node.getAttribute('src') || node.src, imageState, alt);
+        if (imageNode) {
+          appendInlineNode(inlines, imageNode);
           return;
         }
-        const alt = node.getAttribute('alt');
-        if (alt && !alt.includes('Image')) text += alt;
+        if (alt && !alt.includes('Image')) {
+          appendInlineNode(inlines, { type: 'text', text: alt });
+        }
         return;
       }
       node.childNodes.forEach(walk);
     };
 
     el.childNodes.forEach(walk);
-    return text.trim();
+    if (inlines[0]?.type === 'text') inlines[0].text = inlines[0].text.trimStart();
+    const last = inlines[inlines.length - 1];
+    if (last?.type === 'text') last.text = last.text.trimEnd();
+    return inlines.filter((inline) => inline.type !== 'text' || inline.text);
   }
 
   // ── Content extraction ─────────────────────────────────────────────
@@ -376,9 +461,9 @@
     return result;
   }
 
-  function buildQuotedTweetMarkdown(article, imageOffset) {
+  function extractQuotedTweetBlock(article, imageOffset) {
     if (!(article instanceof Element)) {
-      return { markdown: '', imgs: [] };
+      return { block: null, images: [] };
     }
 
     const author = extractAuthorInfo(article);
@@ -387,24 +472,21 @@
       includeQuotedTweets: false,
     });
 
-    const metaParts = [`引用推文`];
-    if (author.displayName || author.handle) {
-      metaParts.push(`${author.displayName} (${author.handle})`);
-    }
-    if (time) metaParts.push(time);
-
-    let markdown = `> ${metaParts.join(' · ')}\n>\n`;
-    const quotedBody = quoteContent.t
-      ? prefixMarkdownLines(quoteContent.t, '> ')
-      : '> [无可提取正文]';
-    markdown += `${quotedBody}\n\n`;
-
-    return { markdown, imgs: quoteContent.imgs };
+    return {
+      block: {
+        type: 'quote',
+        label: t('md_quoted_post', '引用推文'),
+        author,
+        time,
+        blocks: quoteContent.blocks,
+      },
+      images: quoteContent.images,
+    };
   }
 
   function extractRichContent(container, imageOffset = 0, options = {}) {
     const includeQuotedTweets = options.includeQuotedTweets !== false;
-    let text = '';
+    const blocks = [];
     const images = [];
     const imageSet = new Set();
     const seenCardLinks = new Set();
@@ -415,14 +497,7 @@
     };
 
     const rawElements = container.querySelectorAll(
-      'p, h1, h2, h3, h4, h5, h6, li, blockquote, ' +
-        '[data-testid="tweetText"], ' +
-        '[data-testid="tweetPhoto"] img, ' +
-        'img[src*="pbs.twimg.com/media"], ' +
-        'div[lang], ' +
-        'div[data-block="true"], ' +
-        (includeQuotedTweets ? 'article[data-testid="tweet"], ' : '') +
-        'a[href]'
+      dom.richContentCandidates(includeQuotedTweets)
     );
     const elements = filterTopLevelElements(rawElements);
 
@@ -430,22 +505,22 @@
       const tag = el.tagName.toLowerCase();
 
       if (tag === 'a') {
-        const cardMarkdown = buildPreviewCardMarkdown(el, seenCardLinks);
-        if (cardMarkdown) text += `${cardMarkdown}\n\n`;
+        const card = extractPreviewCard(el, seenCardLinks);
+        if (card) blocks.push(card);
         continue;
       }
 
       if (tag === 'img') {
-        const mediaPlaceholder = appendImagePlaceholder(el.src, imageState);
-        if (mediaPlaceholder) text += mediaPlaceholder;
+        const imageNode = createImageNode(el.src, imageState, el.getAttribute('alt') || '');
+        if (imageNode) blocks.push(imageNode);
         continue;
       }
 
-      if (tag === 'article' && el.getAttribute('data-testid') === 'tweet') {
-        const quotedTweet = buildQuotedTweetMarkdown(el, imageState.imgIndex);
-        if (quotedTweet.markdown) {
-          text += quotedTweet.markdown;
-          for (const img of quotedTweet.imgs) {
+      if (tag === 'article' && el.matches(dom.css.tweetArticle)) {
+        const quotedTweet = extractQuotedTweetBlock(el, imageState.imgIndex);
+        if (quotedTweet.block) {
+          blocks.push(quotedTweet.block);
+          for (const img of quotedTweet.images) {
             if (!imageState.imageSet.has(img)) {
               imageState.imageSet.add(img);
               imageState.images.push(img);
@@ -456,51 +531,37 @@
         continue;
       }
 
-      const content = walkTextNode(el, imageState);
-      if (!content) continue;
+      const inlines = extractInlineNodes(el, imageState);
+      if (!inlines.length) continue;
 
-      if (tag === 'h1') text += `# ${content}\n\n`;
-      else if (tag === 'h2') text += `## ${content}\n\n`;
-      else if (tag === 'h3') text += `### ${content}\n\n`;
-      else if (tag === 'h4') text += `#### ${content}\n\n`;
-      else if (tag === 'blockquote') text += `> ${content.replace(/\n/g, '\n> ')}\n\n`;
-      else if (tag === 'li') text += `- ${content}\n`;
-      else text += content + '\n\n';
+      if (/^h[1-6]$/.test(tag)) {
+        blocks.push({ type: 'heading', level: Number(tag.slice(1)), inlines });
+      } else if (tag === 'blockquote') {
+        blocks.push({ type: 'blockquote', inlines });
+      } else if (tag === 'li') {
+        blocks.push({ type: 'listItem', inlines });
+      } else {
+        blocks.push({ type: 'paragraph', inlines });
+      }
     }
 
-    return { t: text.trim(), imgs: images };
+    return { blocks, images };
   }
 
   function detectArticlePage() {
     const articleContainers = getArticleContainers();
-    if (articleContainers.length > 0) return true;
+    if (articleContainers.length === 0) return false;
 
-    // On regular status detail pages, prefer the tweet extraction path unless
-    // we have explicit long-form containers. This avoids misclassifying
-    // quoted/complex tweets as Notes and dropping parts of the content.
-    if (POST_DETAIL_URL_RE.test(window.location.href)) return false;
-
-    const mainContent = document.querySelector('main[role="main"]');
-    if (!mainContent) return false;
-
-    const articles = getTopLevelTweetArticles(mainContent);
-    if (articles.length === 0) return false;
-
-    const firstArticle = articles[0];
-    if (firstArticle.querySelectorAll('[data-testid="tweetText"]').length > 2) return true;
-
-    const mainTimeline =
-      mainContent.querySelector('[data-testid="primaryColumn"]') || mainContent;
-    const richTextSections = mainTimeline.querySelectorAll(
-      'div[lang] > span, div[data-block="true"], div[class*="DraftEditor"], div[class*="public-DraftEditor"]'
-    );
-    return richTextSections.length > 3;
+    // Rich-text containers also occur in composers and timeline UI. Only
+    // accept them on an explicit status/article detail route.
+    const route = classifyPageRoute();
+    return route.kind === 'tweet' || route.kind === 'article';
   }
 
   function getMainTweet() {
-    const statusMatch = window.location.href.match(/\/status\/(\d+)/);
-    if (!statusMatch) return null;
-    const statusId = statusMatch[1];
+    const route = classifyPageRoute();
+    if (route.kind !== 'tweet' || !route.statusId) return null;
+    const statusId = route.statusId;
     const articles = getTopLevelTweetArticles();
 
     for (const article of articles) {
@@ -509,14 +570,12 @@
         if (link.querySelector('time')) return article;
       }
     }
-    for (const article of articles) {
-      if (article.querySelector('[data-testid="tweetText"]')) return article;
-    }
-    return articles[0] || null;
+    // Do not silently export an unrelated article when X changes its DOM.
+    return null;
   }
 
   function extractAuthorInfo(tweetEl) {
-    const el = tweetEl.querySelector('[data-testid="User-Name"]');
+    const el = tweetEl.querySelector(dom.css.author);
     if (!el) return { displayName: 'Unknown', handle: '@unknown' };
 
     let handle = '';
@@ -524,8 +583,9 @@
     const links = el.querySelectorAll('a[href]');
     for (const link of links) {
       const href = link.getAttribute('href') || '';
-      if (href.startsWith('/') && !href.includes('/status/')) {
-        handle = '@' + href.slice(1);
+      const handleMatch = href.match(/^\/([A-Za-z0-9_]{1,15})\/?$/);
+      if (handleMatch) {
+        handle = '@' + handleMatch[1];
         break;
       }
     }
@@ -542,7 +602,7 @@
   }
 
   function extractTime(tweetEl) {
-    const timeEl = tweetEl.querySelector('time[datetime]');
+    const timeEl = tweetEl.querySelector(dom.css.time);
     if (!timeEl) return null;
     const datetime = timeEl.getAttribute('datetime');
     if (!datetime) return timeEl.textContent.trim();
@@ -553,9 +613,9 @@
 
   function extractStats(tweetEl) {
     const stats = { replies: '0', retweets: '0', likes: '0' };
-    const actionGroup = tweetEl.querySelector('[role="group"][id]');
+    const actionGroup = tweetEl.querySelector(dom.css.actionGroup);
     if (!actionGroup) return stats;
-    const buttons = actionGroup.querySelectorAll('[role="button"]');
+    const buttons = actionGroup.querySelectorAll(dom.css.actionButton);
     const labels = ['replies', 'retweets', 'likes'];
     buttons.forEach((btn, idx) => {
       if (idx >= labels.length) return;
@@ -575,13 +635,18 @@
 
   function extractThreadTweets(mainTweetEl) {
     const author = extractAuthorInfo(mainTweetEl);
+    if (!author.handle || author.handle === '@unknown') return [];
     const allArticles = getTopLevelTweetArticles();
     const mainIdx = Array.from(allArticles).indexOf(mainTweetEl);
+    if (mainIdx < 0) return [];
     const tweets = [];
     for (let i = mainIdx + 1; i < allArticles.length; i += 1) {
       const article = allArticles[i];
-      if (extractAuthorInfo(article).handle === author.handle) {
-        tweets.push(extractRichContent(article));
+      const nextAuthor = extractAuthorInfo(article);
+      if (nextAuthor.handle === author.handle && nextAuthor.handle !== '@unknown') {
+        const extracted = extractRichContent(article);
+        if (!hasMeaningfulContentBlocks(extracted.blocks) && extracted.images.length === 0) break;
+        tweets.push(extracted);
       } else {
         break;
       }
@@ -590,8 +655,8 @@
   }
 
   function extractArticle() {
-    _XPD.sendProgress?.('正在提取长文内容...');
-    let text = '';
+    _XPD.sendProgress?.(t('progress_extracting_article', '正在提取长文内容...'));
+    const blocks = [];
     let images = [];
     let author = { displayName: 'Unknown', handle: '@unknown' };
     let time = null;
@@ -605,20 +670,12 @@
     const knownContainers = getArticleContainers();
     if (knownContainers.length > 0) {
       for (const container of knownContainers) {
-        const { t, imgs } = extractRichContent(container, images.length);
-        text += t + '\n\n';
-        images.push(...imgs);
+        const extracted = extractRichContent(container, images.length);
+        blocks.push(...extracted.blocks);
+        images.push(...extracted.images);
       }
     }
-    if (!text.trim()) {
-      console.log('[XPD] Trying broad content extraction...');
-      const primaryColumn =
-        document.querySelector('[data-testid="primaryColumn"]') || document.body;
-      const { t, imgs } = extractRichContent(primaryColumn, images.length);
-      text = t;
-      images = imgs;
-    }
-    return { text: text.trim(), images, author, time };
+    return { blocks, images, author, time };
   }
 
   function extractComments() {
@@ -636,13 +693,101 @@
       if (!pastThread && commentAuthor.handle === author.handle) continue;
       pastThread = true;
       const textData = extractRichContent(article);
-      const bodyText = textData.t.replace(/!\[[^\]]*\]\(__IMG_\d+__\)/g, '').trim();
-      if (bodyText) {
-        comments.push({ author: commentAuthor, text: bodyText, time: extractTime(article) });
+      if (hasMeaningfulContentBlocks(textData.blocks)) {
+        comments.push({
+          author: commentAuthor,
+          blocks: textData.blocks,
+          time: extractTime(article),
+        });
       }
       if (comments.length >= 20) break;
     }
     return comments;
+  }
+
+  function collectImageUrlsFromBlocks(blocks, urls = []) {
+    for (const block of blocks || []) {
+      if (block?.type === 'image' && block.url) urls.push(block.url);
+      for (const inline of block?.inlines || []) {
+        if (inline?.type === 'image' && inline.url) urls.push(inline.url);
+      }
+      if (block?.type === 'quote') collectImageUrlsFromBlocks(block.blocks, urls);
+    }
+    return urls;
+  }
+
+  function createPostDocument(input) {
+    const blocks = Array.isArray(input?.blocks) ? input.blocks : [];
+    const thread = Array.isArray(input?.thread) ? input.thread : [];
+    const comments = Array.isArray(input?.comments) ? input.comments : [];
+    if (!hasMeaningfulContentBlocks(blocks)) {
+      throw new ExtractionError('DOCUMENT_EMPTY', buildExtractionFailureMessage(input?.kind));
+    }
+    return {
+      schemaVersion: 1,
+      kind: input?.kind === 'article' ? 'article' : 'tweet',
+      title: String(input?.title || deriveTitleFromBlocks(blocks)),
+      author: input?.author || { displayName: 'Unknown', handle: '@unknown' },
+      publishedAt: input?.publishedAt || null,
+      stats: input?.stats || { replies: '0', retweets: '0', likes: '0' },
+      sourceUrl: String(input?.sourceUrl || ''),
+      blocks,
+      thread: thread.map((entry) => ({ blocks: Array.isArray(entry?.blocks) ? entry.blocks : [] })),
+      comments: comments.map((entry) => ({
+        author: entry?.author || { displayName: 'Unknown', handle: '@unknown' },
+        publishedAt: entry?.publishedAt || entry?.time || null,
+        blocks: Array.isArray(entry?.blocks) ? entry.blocks : [],
+      })),
+    };
+  }
+
+  function buildDiagnosticReport() {
+    const route = classifyPageRoute();
+    const tweets = getTopLevelTweetArticles();
+    const articleNodes = getArticleContainers();
+    let site = 'unsupported';
+    try {
+      const hostname = new URL(window.location.href).hostname.replace(/^www\./i, '');
+      if (hostname === 'x.com' || hostname === 'twitter.com') site = hostname;
+    } catch {
+      // Keep the non-identifying fallback.
+    }
+    let extensionVersion = 'unknown';
+    try {
+      extensionVersion = chrome.runtime.getManifest().version || 'unknown';
+    } catch {
+      // The browser fixture and unit tests may not expose a manifest.
+    }
+
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      extensionVersion,
+      selectorVersion: dom.version,
+      page: {
+        site,
+        kind: route.kind,
+        articleDetected: detectArticlePage(),
+        targetPostLocated: route.kind === 'tweet' ? Boolean(getMainTweet()) : false,
+      },
+      signals: {
+        topLevelPostCount: tweets.length,
+        articleContainerCount: articleNodes.length,
+        mediaImageCount: document.querySelectorAll(dom.css.mediaImage).length,
+        cardCandidateCount: document.querySelectorAll(dom.css.cardMarker).length,
+        primaryColumnPresent: Boolean(document.querySelector(dom.css.primaryColumn)),
+      },
+      privacy: {
+        includesBodyText: false,
+        includesAccount: false,
+        includesStatusId: false,
+        includesFullUrl: false,
+      },
+    };
+  }
+
+  function serializeDiagnosticReport() {
+    return JSON.stringify(buildDiagnosticReport(), null, 2);
   }
 
   function makeFilename(titleText, author, isArticle) {
@@ -657,12 +802,14 @@
         .replace(/\.+$/g, '')
         .substring(0, 80)
         .trim();
-      if (!title || looksLikeImageLabel(title)) title = `文章_${dateStr}`;
+      if (!title || looksLikeImageLabel(title)) {
+        title = `${t('filename_article', '文章')}_${dateStr}`;
+      }
       return title;
     }
 
     // 普通推文：推文 + 时间
-    return `推文_${dateStr}`;
+    return `${t('filename_tweet', '推文')}_${dateStr}`;
   }
 
   // ── Export module ──────────────────────────────────────────────────
@@ -671,11 +818,20 @@
     MAX_IMAGE_WIDTH,
     JPEG_QUALITY,
     POST_DETAIL_URL_RE,
+    classifyPageRoute,
     escapeHtml,
     escapeMarkdownText,
     escapeMarkdownLinkLabel,
+    escapeMarkdownUrl,
     stripImageMarkdown,
     stripMarkdownSyntax,
+    contentBlocksToPlainText,
+    hasMeaningfulContentBlocks,
+    deriveTitleFromBlocks,
+    collectImageUrlsFromBlocks,
+    createPostDocument,
+    buildDiagnosticReport,
+    serializeDiagnosticReport,
     looksLikeImageLabel,
     deriveTitleText,
     upgradeImageUrl,
