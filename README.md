@@ -4,22 +4,26 @@
 
 [中文](#chinese) | [English](#english)
 
-X Markdown Exporter is a Chrome / Edge extension for copying and archiving X (Twitter) posts, threads, and long-form notes as Markdown for AI tools and local knowledge workflows.
+X Markdown Exporter 是一款 Chrome / Edge 扩展，可将 X（Twitter）推文、线程和长文 Note 复制或归档为 Markdown，方便投喂 AI 工具和整理本地知识库。
+
+English: Copy and archive X (Twitter) posts, threads, and long-form Notes as Markdown for AI tools and local knowledge workflows.
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/x-markdown-exporter/alicknocngkldhijfocddaepnfpgjlee) | [GitHub Releases](https://github.com/rowanjove/x-markdown-exporter/releases)
 
-## Latest Update
+## 最新更新 / Latest Update
 
 ### v1.7.0
 
-- Add English and Simplified Chinese localization throughout the extension
-- Harden post, thread, image, card, and quoted-post extraction with a structured document model
-- Add cancellable image exports, bounded concurrency, progress reporting, diagnostics, and partial-export warnings
-- Add automated unit, browser, packaged-extension, and reproducible-release checks
+- 新增英文和简体中文本地化，覆盖弹窗、悬浮面板、进度提示、文件名和 Markdown 元数据
+- 使用结构化文档模型重构推文、线程、图片、外链卡片和引用推文提取
+- 新增图片并发控制、导出进度、取消操作、本地诊断和部分导出警告
+- 新增单元测试、真实浏览器测试、MV3 打包扩展测试和可复现发布校验
 
-## Preview
+English summary: localization, safer structured extraction, cancellable image exports, diagnostics, and comprehensive release automation.
 
-### Export Example
+## 预览 / Preview
+
+### 导出示例 / Export Example
 
 ![Export Example](assets/export-example.png)
 
