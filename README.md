@@ -10,10 +10,12 @@ X Markdown Exporter is a Chrome / Edge extension for copying and archiving X (Tw
 
 ## Latest Update
 
-### v1.6.1
+### v1.7.0
 
-- Shorten the primary action label to `下载` / `Download` so the compact panel button fits better
-- Keep the v1.6 Markdown copy, content labels, and clearer page guidance
+- Add English and Simplified Chinese localization throughout the extension
+- Harden post, thread, image, card, and quoted-post extraction with a structured document model
+- Add cancellable image exports, bounded concurrency, progress reporting, diagnostics, and partial-export warnings
+- Add automated unit, browser, packaged-extension, and reproducible-release checks
 
 ## Preview
 
@@ -39,11 +41,14 @@ X Markdown Exporter is a Chrome / Edge extension for copying and archiving X (Tw
 - 一键复制 Markdown 文本，适合快速投喂给 OpenClaw、Claude Code 等工具
 - 可在面板状态旁显示推文、文章、线程、图片数量、引用推文和外链卡片等内容标签
 - 保留正文和图片的原始顺序
+- 使用结构化内容模型保存文本、链接、图片、引用和卡片顺序，避免字符串占位符碰撞
 - 支持同作者线程连续导出
 - 支持外链预览卡提取，导出时会尽量保留链接标题、摘要和域名
 - 支持三种导出模式
 - 默认附带作者和发布时间
 - 时间线、搜索页、主页等不支持直接导出的页面会给出更明确的下一步提示
+- 根据浏览器语言提供英文或简体中文界面、进度提示与 Markdown 元数据标签
+- 图片归档使用受控并发，并可在悬浮面板或扩展弹窗中查看进度和取消导出
 - 所有处理都在本地浏览器完成，不依赖后端服务
 
 ### 典型场景
@@ -95,7 +100,7 @@ Markdown 和图片分开保存，再打包成 ZIP。
 #### 方式二：从 GitHub Releases 下载
 
 1. 打开 [Releases](https://github.com/rowanjove/x-markdown-exporter/releases)
-2. 下载最新版本里的 `x-markdown-exporter-v1.6.1.zip`
+2. 下载最新版本里的 `x-markdown-exporter-v1.7.0.zip`
 3. 解压 ZIP 文件
 4. 打开扩展管理页
    Chrome: `chrome://extensions/`
@@ -136,6 +141,10 @@ git clone https://github.com/rowanjove/x-markdown-exporter.git
 ├─ content.css
 ├─ background.js
 ├─ jszip.min.js
+├─ package.json
+├─ IMPROVEMENT_PLAN.md
+├─ scripts/
+├─ tests/
 ├─ icons/
 ├─ assets/
 └─ dist/
@@ -177,6 +186,42 @@ git clone https://github.com/rowanjove/x-markdown-exporter.git
 
 项目没有构建步骤。
 
+质量检查：
+
+```bash
+npm run check
+```
+
+运行完整检查（包括 Playwright 页面 fixture 和真实 MV3 扩展安装、注入、下载、Service Worker 测试）：
+
+```bash
+npm run check:all
+```
+
+仅校验版本和 CHANGELOG 等发布元数据：
+
+```bash
+npm run verify:release
+```
+
+在不覆盖已有发布物的情况下，在 `dist/` 生成发布目录和 ZIP：
+
+```bash
+npm run package
+```
+
+打包过程会逐文件验证 ZIP，并生成对应的 `.zip.sha256` 校验文件。
+
+完整改进路线见 [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)。
+
+启动真实浏览器 UI fixture：
+
+```bash
+npm run fixture
+```
+
+然后打开 `http://127.0.0.1:4173/`，验证悬浮面板、复制和下载交互。
+
 本地测试：
 
 1. 修改仓库文件
@@ -202,12 +247,15 @@ It is also useful for archiving. Good posts, threads, and long-form Notes often 
 - Copy Markdown text with one click for fast AI-context handoff to OpenClaw, Claude Code, and similar tools
 - Show content labels for posts, articles, threads, image counts, quoted posts, and link cards
 - Preserve the original order of text and images
+- Keep text, links, images, quotes, and cards in a structured document model instead of indexed string placeholders
 - Export same-author thread continuations
 - Convert supported link preview cards into Markdown links with title / summary / domain
 - Support `link`, `embed`, and `zip` output modes
 - Include author, publish time, and `source_url` by default
 - Guard oversized `embed` exports by offering a ZIP fallback
 - Give clearer next-step guidance on timeline, search, profile, explore, and still-loading pages
+- Localize the interface, progress messages, filenames, and Markdown metadata for English and Simplified Chinese browser locales
+- Fetch archive images with bounded concurrency and expose progress plus cancellation in both extension interfaces
 - Run fully in the browser with no backend service
 
 ### Common Workflows
@@ -259,7 +307,7 @@ Best for:
 #### Option 2: Download from GitHub Releases
 
 1. Open [Releases](https://github.com/rowanjove/x-markdown-exporter/releases)
-2. Download `x-markdown-exporter-v1.6.1.zip`
+2. Download `x-markdown-exporter-v1.7.0.zip`
 3. Extract the ZIP file
 4. Open the extensions page
    Chrome: `chrome://extensions/`
@@ -340,6 +388,42 @@ The toolbar popup is still available as a fallback entry point.
 ### Development
 
 There is no build step.
+
+Run the syntax and regression checks:
+
+```bash
+npm run check
+```
+
+Run the complete suite, including the Playwright page fixture and a real MV3 extension install, injection, download, and service-worker test:
+
+```bash
+npm run check:all
+```
+
+Validate release metadata without creating artifacts:
+
+```bash
+npm run verify:release
+```
+
+Create a release directory and ZIP in `dist/` without overwriting existing artifacts:
+
+```bash
+npm run package
+```
+
+Packaging now verifies every ZIP entry and writes a matching `.zip.sha256` sidecar.
+
+See [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) for the implementation roadmap.
+
+Start the real-browser UI fixture:
+
+```bash
+npm run fixture
+```
+
+Then open `http://127.0.0.1:4173/` to verify the floating panel, copy, and download flows.
 
 To test local changes:
 

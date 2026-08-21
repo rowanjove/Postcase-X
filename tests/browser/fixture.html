@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X Markdown Exporter Browser Fixture</title>
+  <link rel="stylesheet" href="/content.css">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 48px;
+      box-sizing: border-box;
+      background: #f4f7fb;
+      color: #17202a;
+      font-family: system-ui, sans-serif;
+    }
+
+    main { max-width: 680px; margin: 0 auto; }
+    article {
+      padding: 24px;
+      border: 1px solid #d8e0ea;
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 18px 45px rgba(35, 55, 80, 0.08);
+    }
+
+    [data-testid="User-Name"] { font-weight: 700; }
+    [data-testid="tweetText"] { margin: 18px 0; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>浏览器回归 Fixture</h1>
+    <p>此页面只用于验证扩展 UI、可信点击、复制和下载编排。</p>
+    <article data-testid="tweet">
+      <div data-testid="User-Name">
+        <a href="/fixture_author"><span>Fixture Author</span></a>
+      </div>
+      <a href="/fixture_author/status/987654321"><time datetime="2026-08-20T10:30:00Z">10:30</time></a>
+      <div data-testid="tweetText" lang="zh">
+        Fixture 正文包含 &lt;unsafe-html&gt;、# heading 和
+        <a href="https://example.com/reference">一个链接</a>。
+      </div>
+      <div data-testid="tweetPhoto">
+        <img src="https://pbs.twimg.com/media/fixture.jpg?format=jpg&amp;name=small" alt="Fixture image">
+        <img src="https://pbs.twimg.com/media/fixture-2.jpg?format=jpg&amp;name=small" alt="Fixture image 2">
+      </div>
+      <div role="group" id="fixture-actions">
+        <button type="button" aria-label="1 reply">回复</button>
+        <button type="button" aria-label="2 reposts">转发</button>
+        <button type="button" aria-label="3 likes">喜欢</button>
+      </div>
+    </article>
+    <h2>最近复制的 Markdown</h2>
+    <pre id="fixture-output" aria-live="polite"></pre>
+    <h2>最近生成的下载</h2>
+    <pre id="fixture-download" aria-live="polite"></pre>
+  </main>
+
+  <script src="/__fixture__/locale-en.js"></script>
+  <script>
+    (() => {
+      const store = {};
+      const messageListeners = [];
+      const pendingImageFetches = new Map();
+      let fixtureFetchSequence = 0;
+      window.chrome = {
+        i18n: {
+          getMessage(key) {
+            return window.__XPD_MESSAGES__?.[key]?.message || '';
+          },
+          getUILanguage: () => 'en-US',
+        },
+        storage: {
+          local: {
+            get(keys, callback) {
+              const names = Array.isArray(keys) ? keys : [keys];
+              const result = {};
+              for (const name of names) {
+                if (Object.hasOwn(store, name)) result[name] = store[name];
+              }
+              callback(result);
+            },
+            set(values, callback) {
+              Object.assign(store, values);
+              callback?.();
+            },
+          },
+        },
+        runtime: {
+          getManifest: () => ({ version: '1.7.0' }),
+          onMessage: { addListener: (listener) => messageListeners.push(listener) },
+          sendMessage(message, callback) {
+            if (message?.type === 'FETCH_IMAGE') {
+              return new Promise((resolve) => {
+                fixtureFetchSequence += 1;
+                const response = {
+                  success: true,
+                  data: {
+                    contentType: 'image/png',
+                    base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+                  },
+                };
+                const timer = setTimeout(() => {
+                  pendingImageFetches.delete(message.requestId);
+                  callback?.(response);
+                  resolve(response);
+                }, fixtureFetchSequence === 1 ? 200 : 600);
+                pendingImageFetches.set(message.requestId, { timer, callback, resolve });
+              });
+            }
+            if (message?.type === 'CANCEL_IMAGE_FETCH') {
+              const pending = pendingImageFetches.get(message.requestId);
+              if (pending) {
+                clearTimeout(pending.timer);
+                const cancelledResponse = {
+                  success: false,
+                  cancelled: true,
+                  error: 'Image fetch cancelled',
+                };
+                pending.callback?.(cancelledResponse);
+                pending.resolve(cancelledResponse);
+                pendingImageFetches.delete(message.requestId);
+              }
+              const response = { success: true, cancelled: Boolean(pending) };
+              callback?.(response);
+              return Promise.resolve(response);
+            }
+            const response = { success: true };
+            callback?.(response);
+            return Promise.resolve(response);
+          },
+        },
+      };
+      window.__XPD_FIXTURE__ = { store, messageListeners, clipboardText: '' };
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          async writeText(text) {
+            window.__XPD_FIXTURE__.clipboardText = text;
+            document.getElementById('fixture-output').textContent = text;
+          },
+        },
+      });
+      const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function fixtureAnchorClick() {
+        if (this.download) {
+          const details = {
+            filename: this.download,
+            hrefProtocol: new URL(this.href).protocol,
+          };
+          document.getElementById('fixture-download').textContent = JSON.stringify(details);
+          fetch(this.href).then(async (response) => {
+            const blob = await response.blob();
+            details.mimeType = blob.type;
+            details.size = blob.size;
+            if (this.download.endsWith('.md')) {
+              details.hasEmbeddedImage = (await blob.text()).includes('data:image/png;base64,');
+            }
+            document.getElementById('fixture-download').textContent = JSON.stringify(details);
+          });
+          return;
+        }
+        return nativeAnchorClick.call(this);
+      };
+      document.addEventListener('click', (event) => {
+        if (event.target?.closest?.('#xpd-floating-root')) {
+          console.log(`[XPD Fixture] click trusted=${event.isTrusted}`);
+        }
+      }, true);
+    })();
+  </script>
+  <script src="/content-selectors.js"></script>
+  <script src="/content-core.js"></script>
+  <script>
+    window._XPD.core.classifyPageRoute = () => ({ kind: 'tweet', statusId: '987654321' });
+    window._XPD.core.detectArticlePage = () => false;
+    window._XPD.core.getMainTweet = () => document.querySelector('article[data-testid="tweet"]');
+  </script>
+  <script src="/jszip.min.js"></script>
+  <script src="/content-export.js"></script>
+  <script src="/__fixture__/content-ui.js"></script>
+  <script src="/content.js"></script>
+</body>
+</html>

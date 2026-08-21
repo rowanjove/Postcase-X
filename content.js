@@ -8,6 +8,7 @@
   const core = _XPD.core;
   const exp = _XPD.exp;
   const ui = _XPD.ui;
+  const t = _XPD.t || ((key, fallback) => fallback);
 
   const DEFAULT_EXPORT_OPTIONS = Object.freeze({
     includeTime: true,
@@ -15,12 +16,13 @@
     includeStats: false,
     includeComments: false,
   });
+  let activeExportController = null;
 
   // Progress bridge
 
-  function sendProgress(text) {
-    ui.updateProgressText(text);
-    chrome.runtime.sendMessage({ type: 'XPD_PROGRESS', text }).catch(() => {});
+  function sendProgress(text, progress = null) {
+    ui.updateProgressText(text, progress);
+    chrome.runtime.sendMessage({ type: 'XPD_PROGRESS', text, progress }).catch(() => {});
   }
 
   // Expose sendProgress so core and export modules can call it.
@@ -40,62 +42,109 @@
 
   // Core extraction / action orchestrators
 
-  async function buildExportPayload(options) {
+  function throwIfCancelled(signal) {
+    if (!signal?.aborted) return;
+    const error = new Error(t('export_cancelled', '导出已取消'));
+    error.name = 'AbortError';
+    error.code = 'EXPORT_CANCELLED';
+    throw error;
+  }
+
+  async function runExportJob(operation) {
+    if (activeExportController) {
+      const error = new Error(t('export_busy', '已有导出任务正在进行'));
+      error.code = 'EXPORT_BUSY';
+      throw error;
+    }
+    const controller = new AbortController();
+    activeExportController = controller;
+    try {
+      return await operation(controller.signal);
+    } finally {
+      if (activeExportController === controller) activeExportController = null;
+    }
+  }
+
+  function cancelActiveExport() {
+    if (!activeExportController) return false;
+    activeExportController.abort('user');
+    sendProgress(t('export_cancelling', '正在取消导出...'));
+    return true;
+  }
+
+  async function buildExportPayload(options, signal) {
+    throwIfCancelled(signal);
     const exportOptions = normalizeOptions(options);
     exportOptions.isArticle = core.detectArticlePage();
     exportOptions.sourceUrl = core.getSourceUrl();
 
-    sendProgress('正在查找内容...');
+    sendProgress(t('progress_searching', '正在查找内容...'));
 
     console.log('[XPD] Page type:', exportOptions.isArticle ? 'ARTICLE' : 'TWEET');
 
-    let textData;
+    let blocks;
     let author;
     let time;
     let stats;
-    let threadTweets;
+    let thread;
 
     if (exportOptions.isArticle) {
       const articleData = core.extractArticle();
-      core.validateExtracted(articleData, 'Note 页面');
-      textData = { t: articleData.text, imgs: articleData.images };
+      throwIfCancelled(signal);
+      core.validateExtracted(articleData, 'note');
+      blocks = articleData.blocks;
       author = articleData.author;
       time = articleData.time;
       stats = { replies: '0', retweets: '0', likes: '0' };
-      threadTweets = [];
+      thread = [];
     } else {
       const mainTweetEl = core.getMainTweet();
       if (!mainTweetEl) {
         throw new core.ExtractionError(
           'MAIN_TWEET_NOT_FOUND',
-          `未找到当前推文正文。请确认已打开具体推文详情页，并等待内容加载完成；如果一直失败，请刷新页面后重试，或到 GitHub 提 Issue: ${core.GITHUB_ISSUES_URL}`
+          `${t('main_tweet_not_found', '未找到当前推文正文。请确认已打开具体推文详情页，并等待内容加载完成；如果一直失败，请刷新页面后重试，或到 GitHub 提 Issue:')} ${core.GITHUB_ISSUES_URL}`
         );
       }
 
-      sendProgress('正在提取正文...');
-      textData = core.extractRichContent(mainTweetEl);
-      core.validateExtracted(textData, '推文');
+      sendProgress(t('progress_extracting_body', '正在提取正文...'));
+      const extracted = core.extractRichContent(mainTweetEl);
+      throwIfCancelled(signal);
+      core.validateExtracted(extracted, 'tweet');
+      blocks = extracted.blocks;
       author = core.extractAuthorInfo(mainTweetEl);
       time = core.extractTime(mainTweetEl);
       stats = core.extractStats(mainTweetEl);
-      threadTweets = core.extractThreadTweets(mainTweetEl);
+      thread = core.extractThreadTweets(mainTweetEl);
     }
+    throwIfCancelled(signal);
 
     console.log('[XPD] Extracted:', {
-      textLen: textData.t.length,
-      images: textData.imgs.length,
-      thread: threadTweets.length,
+      textLen: core.contentBlocksToPlainText(blocks).length,
+      images: core.collectImageUrlsFromBlocks(blocks, []).length,
+      thread: thread.length,
     });
 
-    const titleText = core.deriveTitleText(textData.t);
+    const documentModel = core.createPostDocument({
+      kind: exportOptions.isArticle ? 'article' : 'tweet',
+      title: core.deriveTitleFromBlocks(blocks),
+      author,
+      publishedAt: time,
+      stats,
+      sourceUrl: exportOptions.sourceUrl,
+      blocks,
+      thread,
+      comments: exportOptions.includeComments ? core.extractComments() : [],
+    });
 
-    return { titleText, textData, author, time, stats, threadTweets, exportOptions };
+    return { documentModel, exportOptions };
   }
 
-  async function writeTextToClipboard(text) {
+  async function writeTextToClipboard(text, signal) {
+    throwIfCancelled(signal);
     if (navigator.clipboard?.writeText) {
       try {
         await navigator.clipboard.writeText(text);
+        throwIfCancelled(signal);
         return;
       } catch (error) {
         console.warn('[XPD] navigator.clipboard failed, falling back:', error.message);
@@ -122,40 +171,45 @@
   }
 
   async function handleExtractAndDownload(options, mode) {
-    const payload = await buildExportPayload(options);
-    const { titleText, textData, author, time, stats, threadTweets, exportOptions } = payload;
+    return runExportJob(async (signal) => {
+      const payload = await buildExportPayload(options, signal);
+      const { documentModel, exportOptions } = payload;
+      let exportResult;
 
-    if (mode === 'zip') {
-      await exp.downloadAsZip(titleText, textData, author, time, stats, threadTweets, exportOptions);
-    } else if (mode === 'embed') {
-      await exp.downloadAsEmbed(titleText, textData, author, time, stats, threadTweets, exportOptions);
-    } else {
-      exp.downloadAsLink(titleText, textData, author, time, stats, threadTweets, exportOptions);
-    }
+      if (mode === 'zip') {
+        exportResult = await exp.downloadAsZip(documentModel, exportOptions, null, signal);
+      } else if (mode === 'embed') {
+        exportResult = await exp.downloadAsEmbed(documentModel, exportOptions, signal);
+      } else {
+        exportResult = exp.downloadAsLink(documentModel, exportOptions, signal);
+      }
 
-    return { success: true };
+      return { success: true, ...(exportResult || {}) };
+    });
   }
 
   async function handleExtractAndCopy(options) {
-    const payload = await buildExportPayload(options);
-    const { titleText, textData, author, time, stats, threadTweets, exportOptions } = payload;
-    _XPD.sendProgress?.('正在复制 Markdown...');
-    const markdown = exp.buildMarkdownAsLink(
-      titleText,
-      textData,
-      author,
-      time,
-      stats,
-      threadTweets,
-      exportOptions
-    );
-    await writeTextToClipboard(markdown);
-    return { success: true };
+    return runExportJob(async (signal) => {
+      const payload = await buildExportPayload(options, signal);
+      const { documentModel, exportOptions } = payload;
+      _XPD.sendProgress?.(t('copy_progress', '正在复制 Markdown...'));
+      const markdown = exp.buildMarkdownAsLink(documentModel, exportOptions);
+      await writeTextToClipboard(markdown, signal);
+      return { success: true };
+    });
+  }
+
+  async function copyDiagnosticReport() {
+    const report = core.serializeDiagnosticReport();
+    await writeTextToClipboard(report);
+    return { success: true, report };
   }
 
   // Expose so UI module can call actions from the floating panel buttons.
   _XPD.handleExtractAndDownload = handleExtractAndDownload;
   _XPD.handleExtractAndCopy = handleExtractAndCopy;
+  _XPD.cancelActiveExport = cancelActiveExport;
+  _XPD.copyDiagnosticReport = copyDiagnosticReport;
 
   // Message listener
 
@@ -166,13 +220,32 @@
       return false;
     }
 
+    if (message.type === 'CANCEL_EXPORT') {
+      sendResponse({ success: true, cancelled: cancelActiveExport() });
+      return false;
+    }
+
+    if (message.type === 'COPY_DIAGNOSTICS') {
+      copyDiagnosticReport()
+        .then(() => sendResponse({ success: true }))
+        .catch(() => sendResponse({
+          success: false,
+          error: t('diagnostics_failed', '诊断报告复制失败'),
+        }));
+      return true;
+    }
+
     if (message.type === 'EXTRACT_AND_DOWNLOAD') {
       ui.beginUiWork();
       handleExtractAndDownload(message.options, message.mode)
         .then((result) => sendResponse(result))
         .catch((error) => {
-          console.error('[XPD] Error:', error);
-          sendResponse({ success: false, error: error.message });
+          if (error?.code !== 'EXPORT_CANCELLED') console.error('[XPD] Error:', error);
+          sendResponse({
+            success: false,
+            cancelled: error?.code === 'EXPORT_CANCELLED',
+            error: error.message,
+          });
         })
         .finally(() => {
           ui.endUiWork();
@@ -186,8 +259,12 @@
       handleExtractAndCopy(message.options)
         .then((result) => sendResponse(result))
         .catch((error) => {
-          console.error('[XPD] Error:', error);
-          sendResponse({ success: false, error: error.message });
+          if (error?.code !== 'EXPORT_CANCELLED') console.error('[XPD] Error:', error);
+          sendResponse({
+            success: false,
+            cancelled: error?.code === 'EXPORT_CANCELLED',
+            error: error.message,
+          });
         })
         .finally(() => {
           ui.endUiWork();

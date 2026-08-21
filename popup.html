@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <style>
@@ -176,6 +176,7 @@
       margin-top: 10px;
       font-size: 12px;
       color: #8b98a5;
+      flex-wrap: wrap;
     }
 
     .progress.show { display: flex; }
@@ -188,6 +189,45 @@
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
+
+    .progress span { flex: 1; }
+
+    .progress-bar {
+      order: 4;
+      flex: 0 0 100%;
+      width: 100%;
+      height: 4px;
+      accent-color: #1d9bf0;
+    }
+
+    .progress-bar[hidden] { display: none; }
+
+    .cancel-btn {
+      padding: 4px 8px;
+      border: 0;
+      border-radius: 7px;
+      background: rgba(244, 33, 46, 0.15);
+      color: #ff989f;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .cancel-btn:disabled { opacity: 0.55; cursor: default; }
+
+    .diagnostic-btn {
+      display: block;
+      margin: -2px 0 10px auto;
+      padding: 2px 0;
+      border: 0;
+      background: transparent;
+      color: #7ea6c7;
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .diagnostic-btn:hover:not(:disabled) { color: #9fcfff; text-decoration: underline; }
+    .diagnostic-btn:disabled { opacity: 0.5; cursor: default; }
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -202,6 +242,7 @@
 
     .result.success { display: block; background: rgba(0, 186, 124, 0.15); color: #00ba7c; }
     .result.error { display: block; background: rgba(244, 33, 46, 0.15); color: #f4212e; }
+    .result.warning { display: block; background: rgba(255, 173, 31, 0.15); color: #f5b642; }
 
     .footer {
       margin-top: 14px;
@@ -214,40 +255,43 @@
 <body>
   <div class="header">
     <img src="icons/icon48.png" alt="">
-    <h1>X Markdown Exporter</h1>
+    <h1 data-i18n="extension_name">X Markdown Exporter</h1>
   </div>
 
-  <div class="status loading" id="status">
+  <div class="status loading" id="status" role="status" aria-live="polite">
     <div class="status-dot"></div>
-    <span>检测中...</span>
-    <b class="status-type" id="statusKind">其他</b>
+    <span data-i18n="checking">检测中...</span>
+    <b class="status-type" id="statusKind" data-i18n="kind_other">其他</b>
   </div>
 
-  <div class="section-title">下载格式</div>
-  <div class="mode-selector" id="modeSelector">
-    <button class="mode-btn" data-mode="link">链接引用</button>
-    <button class="mode-btn active" data-mode="embed">内嵌图片</button>
-    <button class="mode-btn" data-mode="zip">ZIP 打包</button>
+  <div class="section-title" data-i18n="download_format">下载格式</div>
+  <div class="mode-selector" id="modeSelector" role="group" aria-label="下载格式" data-i18n-aria-label="download_format">
+    <button class="mode-btn" data-mode="link" aria-pressed="false" data-i18n="mode_link">链接引用</button>
+    <button class="mode-btn active" data-mode="embed" aria-pressed="true" data-i18n="mode_embed">内嵌图片</button>
+    <button class="mode-btn" data-mode="zip" aria-pressed="false" data-i18n="mode_zip">ZIP 打包</button>
   </div>
-  <div class="mode-desc" id="modeDesc">图片压缩后以内嵌方式写入 Markdown，单文件保存更省心。</div>
+  <div class="mode-desc" id="modeDesc" data-i18n="mode_embed_desc">图片压缩后以内嵌方式写入 Markdown，单文件保存更省心。</div>
 
   <div class="meta-note">
-    导出时默认附带作者和时间，界面先保持精简，下载时直接带上。
+    <span data-i18n="metadata_note">导出时默认附带作者和时间，界面先保持精简，下载时直接带上。</span>
   </div>
 
   <div class="buttons-row">
-    <button class="btn btn-primary" id="downloadBtn" disabled>下载</button>
-    <button class="btn btn-secondary" id="copyBtn" disabled>复制</button>
-    <button class="btn btn-secondary" id="refreshBtn" title="刷新页面">刷新</button>
+    <button class="btn btn-primary" id="downloadBtn" disabled data-i18n="download">下载</button>
+    <button class="btn btn-secondary" id="copyBtn" disabled data-i18n="copy">复制</button>
+    <button class="btn btn-secondary" id="refreshBtn" title="刷新页面" data-i18n="refresh" data-i18n-title="refresh_page">刷新</button>
   </div>
+  <button class="diagnostic-btn" id="diagnosticBtn" data-i18n="diagnostics_copy">复制诊断报告</button>
 
-  <div class="progress" id="progress">
+  <div class="progress" id="progress" role="status" aria-live="polite">
     <div class="spinner"></div>
-    <span id="progressText">正在提取内容...</span>
+    <span id="progressText" data-i18n="progress_extracting">正在提取内容...</span>
+    <button class="cancel-btn" id="cancelBtn" data-i18n="cancel">取消</button>
+    <progress class="progress-bar" id="progressBar" max="1" value="0" hidden></progress>
   </div>
-  <div class="result" id="result"></div>
+  <div class="result" id="result" role="status" aria-live="polite"></div>
 
-  <div class="footer">v1.6.1</div>
+  <div class="footer" id="versionText"></div>
 
   <script src="popup.js"></script>
 </body>
