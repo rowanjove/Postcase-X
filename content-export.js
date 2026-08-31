@@ -1,4 +1,4 @@
-// X Markdown Exporter - Export Module
+// Postcase - Export Module
 // Markdown assembly, image processing, and download logic.
 
 (function () {
@@ -10,8 +10,50 @@
 
   const EMBED_WARN_THRESHOLD_BYTES = 12 * 1024 * 1024;
   const EMBED_HARD_LIMIT_BYTES = 40 * 1024 * 1024;
+  const MEDIA_TOTAL_BUDGET_BYTES = 64 * 1024 * 1024;
+  const MAX_ARCHIVE_IMAGE_COUNT = 500;
+  const MAX_IMAGE_PIXELS = 8 * 1024 * 1024;
   const IMAGE_CONCURRENCY_LIMIT = 3;
   let imageRequestSequence = 0;
+
+  function createMediaBudget(limit = MEDIA_TOTAL_BUDGET_BYTES) {
+    return {
+      limit,
+      totalBytes: 0,
+      accounted: new Set(),
+      add(key, bytes) {
+        if (this.accounted.has(key)) return true;
+        const size = Number(bytes);
+        if (!Number.isFinite(size) || size < 0 || this.totalBytes + size > this.limit) return false;
+        this.totalBytes += size;
+        this.accounted.add(key);
+        return true;
+      },
+    };
+  }
+
+  function createMediaBudgetError(kind = 'bytes') {
+    const error = new Error(
+      kind === 'count'
+        ? t('media_count_limit', 'This export contains more than 500 images')
+        : t('media_budget_exceeded', 'This export exceeds the 64 MiB media budget')
+    );
+    error.code = kind === 'count' ? 'MEDIA_IMAGE_COUNT_LIMIT' : 'MEDIA_BUDGET_EXCEEDED';
+    return error;
+  }
+
+  function validateImageWorkload(imageUrls) {
+    const uniqueImages = [...new Set(imageUrls || [])];
+    if (uniqueImages.length > MAX_ARCHIVE_IMAGE_COUNT) throw createMediaBudgetError('count');
+    return uniqueImages;
+  }
+
+  function estimateBase64Bytes(base64) {
+    const text = String(base64 || '');
+    if (!text) return 0;
+    const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0;
+    return Math.max(0, Math.floor((text.length * 3) / 4) - padding);
+  }
 
   function createCancelledError() {
     const error = new Error(t('export_cancelled', '导出已取消'));
@@ -79,6 +121,42 @@
     return String(text || '').split('\n').map((line) => `${prefix}${line}`).join('\n');
   }
 
+  function renderCodeBlock(block) {
+    const text = String(block.text || '').replace(/\r\n?/g, '\n');
+    if (!text) return '';
+    const longestFence = Math.max(
+      3,
+      ...Array.from(text.matchAll(/`+/g), (match) => match[0].length + 1)
+    );
+    const fence = '`'.repeat(longestFence);
+    const language = String(block.language || '').replace(/[^a-z0-9_-]/gi, '');
+    return `${fence}${language}\n${text}${text.endsWith('\n') ? '' : '\n'}${fence}`;
+  }
+
+  function renderListBlock(block, resolveImage, indent = '') {
+    const items = Array.isArray(block.items) ? block.items : [];
+    const ordered = block.ordered === true;
+    const parsedStart = Number.isInteger(block.start) ? block.start : 1;
+    const lines = [];
+
+    items.forEach((item, index) => {
+      // New items use ordered blocks; accept legacy inlines/children as well.
+      const blocks = [
+        ...(item?.inlines?.length ? [{ type: 'paragraph', inlines: item.inlines }] : []),
+        ...(item?.blocks || []),
+        ...(item?.children || []),
+      ];
+      const body = renderContentBlocks(blocks, resolveImage);
+      const marker = ordered ? `${parsedStart + index}.` : '-';
+      const continuationIndent = indent + ' '.repeat(marker.length + 1);
+      const bodyLines = body ? body.split('\n') : [''];
+      lines.push(`${indent}${marker}${bodyLines[0] ? ` ${bodyLines[0]}` : ''}`);
+      for (const line of bodyLines.slice(1)) lines.push(`${continuationIndent}${line}`);
+    });
+
+    return lines.join('\n');
+  }
+
   function renderInlineNodes(inlines, resolveImage) {
     return (inlines || []).map((inline) => {
       if (inline?.type === 'text') return core.escapeMarkdownText(inline.text);
@@ -90,7 +168,7 @@
         return `\n\n![${core.escapeMarkdownLinkLabel(inline.alt || t('md_image', '图片'))}](<${destination}>)\n\n`;
       }
       return '';
-    }).join('');
+    }).join('').replace(/\n{3,}/g, '\n\n');
   }
 
   function renderContentBlock(block, resolveImage) {
@@ -119,14 +197,23 @@
         `[${t('md_no_body', '无可提取正文')}]`;
       return `> ${metaParts.join(' · ')}\n>\n${prefixMarkdownLines(body, '> ')}`;
     }
+    if (block.type === 'list') return renderListBlock(block, resolveImage);
+    if (block.type === 'listItem') return renderListBlock({ items: [block] }, resolveImage);
+    if (block.type === 'code') return renderCodeBlock(block);
+    if (block.type === 'blockquote') {
+      const content = renderInlineNodes(block.inlines, resolveImage).trim();
+      const body = block.blocks?.length
+        ? renderContentBlocks(block.blocks, resolveImage).trim()
+        : content;
+      return body ? prefixMarkdownLines(body, '> ') : '';
+    }
+
     const content = renderInlineNodes(block.inlines, resolveImage).trim();
     if (!content) return '';
     if (block.type === 'heading') {
       const level = Math.min(6, Math.max(1, Number(block.level) || 1));
       return `${'#'.repeat(level)} ${content}`;
     }
-    if (block.type === 'listItem') return `- ${content}`;
-    if (block.type === 'blockquote') return prefixMarkdownLines(content, '> ');
     return content;
   }
 
@@ -134,8 +221,7 @@
     return (blocks || [])
       .map((block) => renderContentBlock(block, resolveImage))
       .filter(Boolean)
-      .join('\n\n')
-      .replace(/\n{3,}/g, '\n\n');
+      .join('\n\n');
   }
 
   function composeMarkdown(documentModel, options, resolveImage = (url) => url) {
@@ -225,13 +311,10 @@
       const img = new Image();
 
       img.onload = () => {
+        let canvas = null;
         try {
-          const canvas = document.createElement('canvas');
-          let { width, height } = img;
-          if (width > core.MAX_IMAGE_WIDTH) {
-            height = Math.round((height * core.MAX_IMAGE_WIDTH) / width);
-            width = core.MAX_IMAGE_WIDTH;
-          }
+          canvas = document.createElement('canvas');
+          const { width, height } = fitImageDimensions(img.width, img.height);
           canvas.width = width;
           canvas.height = height;
           const context = canvas.getContext('2d');
@@ -242,10 +325,20 @@
             : normalizedContentType === 'image/webp'
               ? 'image/webp'
               : 'image/jpeg';
-          resolve(canvas.toDataURL(outputType, core.JPEG_QUALITY));
+          const output = canvas.toDataURL(outputType, core.JPEG_QUALITY);
+          resolve(output);
         } catch (error) {
           console.warn('[XPD] Image compression failed, using original:', error.message);
           resolve(dataUrl);
+        } finally {
+          if (canvas) {
+            // Release the canvas backing store before the next image starts.
+            canvas.width = 0;
+            canvas.height = 0;
+          }
+          img.onload = null;
+          img.onerror = null;
+          img.src = '';
         }
       };
 
@@ -255,6 +348,26 @@
       };
       img.src = dataUrl;
     });
+  }
+
+  function fitImageDimensions(width, height) {
+    const sourceWidth = Number(width);
+    const sourceHeight = Number(height);
+    if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) ||
+        sourceWidth <= 0 || sourceHeight <= 0) {
+      return { width: 1, height: 1 };
+    }
+
+    const widthScale = Math.min(1, core.MAX_IMAGE_WIDTH / sourceWidth);
+    let nextWidth = Math.max(1, Math.round(sourceWidth * widthScale));
+    let nextHeight = Math.max(1, Math.round(sourceHeight * widthScale));
+    const pixels = nextWidth * nextHeight;
+    if (pixels > MAX_IMAGE_PIXELS) {
+      const pixelScale = Math.sqrt(MAX_IMAGE_PIXELS / pixels);
+      nextWidth = Math.max(1, Math.floor(nextWidth * pixelScale));
+      nextHeight = Math.max(1, Math.floor(nextHeight * pixelScale));
+    }
+    return { width: nextWidth, height: nextHeight };
   }
 
   /** Determine file extension from content-type for ZIP packaging. */
@@ -286,8 +399,13 @@
     return allImages;
   }
 
-  async function prepareProcessedImages(imageUrls, progressLabel, signal) {
-    const uniqueImages = [...new Set(imageUrls)];
+  async function prepareProcessedImages(
+    imageUrls,
+    progressLabel,
+    signal,
+    mediaBudget = createMediaBudget()
+  ) {
+    const uniqueImages = validateImageWorkload(imageUrls);
     const processedImages = {};
     const failedImages = [];
     let processedBytes = 0;
@@ -295,6 +413,7 @@
     const cancelWork = () => workController.abort('cancelled');
     signal?.addEventListener('abort', cancelWork, { once: true });
     let hardLimitError = null;
+    let mediaBudgetError = null;
 
     try {
       await mapWithConcurrency(
@@ -315,7 +434,15 @@
             failedImages.push(url);
           }
 
-          processedBytes += estimateMarkdownSize(processedImages[url]);
+          if (isDataUrl(processedImages[url])) {
+            const imageBytes = estimateMarkdownSize(processedImages[url]);
+            if (!mediaBudget.add(url, imageBytes)) {
+              mediaBudgetError = createMediaBudgetError();
+              workController.abort('budget');
+              throw mediaBudgetError;
+            }
+            processedBytes += imageBytes;
+          }
           if (processedBytes > EMBED_HARD_LIMIT_BYTES && !hardLimitError) {
             hardLimitError = new Error('Embedded image data exceeds the 40 MB processing limit');
             hardLimitError.code = 'EMBED_HARD_LIMIT';
@@ -335,6 +462,7 @@
         }
       );
     } catch (error) {
+      if (mediaBudgetError) throw mediaBudgetError;
       if (hardLimitError) throw hardLimitError;
       if (signal?.aborted || isCancelledError(error)) throw createCancelledError();
       throw error;
@@ -390,13 +518,16 @@
   async function downloadAsEmbed(documentModel, options, signal) {
     throwIfCancelled(signal);
     const allImages = collectAllImages(documentModel);
+    const mediaBudget = createMediaBudget();
+    validateImageWorkload(allImages);
     let processedImages;
     let failedImages;
     try {
       ({ processedImages, failedImages } = await prepareProcessedImages(
         allImages,
         t('progress_compressing_images', '正在压缩图片'),
-        signal
+        signal,
+        mediaBudget
       ));
     } catch (error) {
       if (error?.code !== 'EMBED_HARD_LIMIT') throw error;
@@ -405,7 +536,8 @@
         documentModel,
         options,
         error.processedImages,
-        signal
+        signal,
+        mediaBudget
       );
       return {
         ...zipResult,
@@ -434,7 +566,8 @@
           documentModel,
           options,
           processedImages,
-          signal
+          signal,
+          mediaBudget
         );
       }
     }
@@ -454,42 +587,79 @@
     documentModel,
     options,
     preparedImages = null,
-    signal = null
+    signal = null,
+    mediaBudget = null
   ) {
     throwIfCancelled(signal);
     const zip = new JSZip();
-    const uniqueImages = [...new Set(collectAllImages(documentModel))];
+    const uniqueImages = validateImageWorkload(collectAllImages(documentModel));
     const imageTargets = {};
     const failedImages = [];
+    const budget = mediaBudget || createMediaBudget();
+    const workController = new AbortController();
+    const cancelWork = () => workController.abort(signal?.reason || 'cancelled');
+    signal?.addEventListener('abort', cancelWork, { once: true });
+    let mediaBudgetError = null;
 
-    await mapWithConcurrency(
-      uniqueImages,
-      IMAGE_CONCURRENCY_LIMIT,
-      async (url, index) => {
-        const preparedDataUrl = preparedImages?.[url];
-        if (isDataUrl(preparedDataUrl)) {
-          imageTargets[url] = addDataUrlToZip(zip, preparedDataUrl, index);
-          return;
-        }
+    try {
+      await mapWithConcurrency(
+        uniqueImages,
+        IMAGE_CONCURRENCY_LIMIT,
+        async (url, index) => {
+          const preparedDataUrl = preparedImages?.[url];
+          if (isDataUrl(preparedDataUrl)) {
+            if (!budget.add(url, estimateMarkdownSize(preparedDataUrl))) {
+              mediaBudgetError = createMediaBudgetError();
+              workController.abort('budget');
+              throw mediaBudgetError;
+            }
+            imageTargets[url] = addDataUrlToZip(zip, preparedDataUrl, index);
+            // The embed-to-ZIP fallback owns this temporary map; release each
+            // data URL after JSZip has accepted it to reduce the peak live set.
+            if (preparedImages) delete preparedImages[url];
+            return;
+          }
 
-        try {
-          const { base64, contentType } = await fetchImageViaBackground(url, signal);
-          imageTargets[url] = addBase64ToZip(zip, base64, contentType, index);
-        } catch (error) {
-          if (isCancelledError(error)) throw error;
-          console.warn(`[XPD] Failed to download image ${index + 1}:`, error.message);
-          imageTargets[url] = url;
-          failedImages.push(url);
+          if (preparedImages && Object.prototype.hasOwnProperty.call(preparedImages, url)) {
+            imageTargets[url] = preparedDataUrl || url;
+            failedImages.push(url);
+            delete preparedImages[url];
+            return;
+          }
+
+          try {
+            const { base64, contentType } = await fetchImageViaBackground(
+              url,
+              workController.signal
+            );
+            if (!budget.add(url, estimateBase64Bytes(base64))) {
+              mediaBudgetError = createMediaBudgetError();
+              workController.abort('budget');
+              throw mediaBudgetError;
+            }
+            imageTargets[url] = addBase64ToZip(zip, base64, contentType, index);
+          } catch (error) {
+            if (isCancelledError(error) || mediaBudgetError) throw error;
+            console.warn(`[XPD] Failed to download image ${index + 1}:`, error.message);
+            imageTargets[url] = url;
+            failedImages.push(url);
+          }
+        },
+        workController.signal,
+        (completed, total) => {
+          _XPD.sendProgress?.(
+            `${t('progress_packaging_image', '正在打包图片')} ${completed}/${total}...`,
+            { completed, total, phase: 'images' }
+          );
         }
-      },
-      signal,
-      (completed, total) => {
-        _XPD.sendProgress?.(
-          `${t('progress_packaging_image', '正在打包图片')} ${completed}/${total}...`,
-          { completed, total, phase: 'images' }
-        );
-      }
-    );
+      );
+    } catch (error) {
+      if (mediaBudgetError) throw mediaBudgetError;
+      if (signal?.aborted || isCancelledError(error)) throw createCancelledError();
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', cancelWork);
+    }
 
     const md = composeMarkdown(
       documentModel,
@@ -500,7 +670,17 @@
 
     throwIfCancelled(signal);
     _XPD.sendProgress?.(t('progress_packaging_zip', '正在打包 ZIP...'));
-    const blob = await zip.generateAsync({ type: 'blob' });
+    const blob = await zip.generateAsync(
+      { type: 'blob', streamFiles: true },
+      (metadata) => {
+        throwIfCancelled(signal);
+        const percent = Math.max(0, Math.min(100, Math.round(Number(metadata?.percent) || 0)));
+        _XPD.sendProgress?.(
+          `${t('progress_packaging_zip', '正在打包 ZIP...')} ${percent}%`,
+          { completed: percent, total: 100, phase: 'zip' }
+        );
+      }
+    );
     throwIfCancelled(signal);
     triggerDownloadBlob(
       blob,
@@ -546,5 +726,12 @@
     downloadAsLink,
     downloadAsEmbed,
     downloadAsZip,
+    createMediaBudget,
+    validateImageWorkload,
+    estimateBase64Bytes,
+    fitImageDimensions,
+    MEDIA_TOTAL_BUDGET_BYTES,
+    MAX_ARCHIVE_IMAGE_COUNT,
+    MAX_IMAGE_PIXELS,
   };
 })();

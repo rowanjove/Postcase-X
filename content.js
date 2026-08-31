@@ -1,4 +1,4 @@
-// X Markdown Exporter - Entry Point
+// Postcase - Entry Point
 // Message listener, orchestration, and initialization.
 
 (function () {
@@ -16,13 +16,82 @@
     includeStats: false,
     includeComments: false,
   });
+  const PROTOCOL_VERSION = 1;
   let activeExportController = null;
+  let diagnosticBusy = false;
+  let taskSequence = 0;
+  let protocolRevision = 0;
+  let exportState = {
+    taskId: null,
+    taskStartedAt: null,
+    taskType: null,
+    action: null,
+    text: '',
+    progress: null,
+    revision: 0,
+  };
 
   // Progress bridge
 
+  function notifyPopup(message) {
+    try {
+      chrome.runtime.sendMessage(message)?.catch?.(() => {});
+    } catch {
+      // Closing a popup or reloading the extension must not interrupt a download.
+    }
+  }
+
+  function createTaskId(taskType) {
+    taskSequence += 1;
+    const startedAt = Date.now();
+    return {
+      taskId: `${taskType}-${startedAt.toString(36)}-${taskSequence}`,
+      startedAt,
+    };
+  }
+
+  function bumpProtocolRevision() {
+    protocolRevision += 1;
+    exportState.revision = protocolRevision;
+    return protocolRevision;
+  }
+
+  function getExportState() {
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      taskId: exportState.taskId,
+      taskStartedAt: exportState.taskStartedAt,
+      taskType: exportState.taskType,
+      revision: exportState.revision,
+      busy: Boolean(activeExportController),
+      diagnosing: diagnosticBusy,
+      cancelling: Boolean(activeExportController?.signal.aborted),
+      action: exportState.action,
+      progressText: exportState.text,
+      progress: exportState.progress,
+    };
+  }
+
+  function publishExportState(result) {
+    bumpProtocolRevision();
+    const state = getExportState();
+    notifyPopup({ type: 'XPD_EXPORT_STATE', ...state, text: state.progressText, ...(result ? { result } : {}) });
+  }
+
   function sendProgress(text, progress = null) {
+    exportState.text = text;
+    exportState.progress = progress;
+    bumpProtocolRevision();
     ui.updateProgressText(text, progress);
-    chrome.runtime.sendMessage({ type: 'XPD_PROGRESS', text, progress }).catch(() => {});
+    notifyPopup({
+      type: 'XPD_PROGRESS',
+      protocolVersion: PROTOCOL_VERSION,
+      taskId: exportState.taskId,
+      taskStartedAt: exportState.taskStartedAt,
+      revision: exportState.revision,
+      text,
+      progress,
+    });
   }
 
   // Expose sendProgress so core and export modules can call it.
@@ -37,7 +106,19 @@
    * When UI toggles are added, they will flow through naturally.
    */
   function normalizeOptions(options) {
-    return { ...DEFAULT_EXPORT_OPTIONS, ...(options || {}) };
+    const source = options && typeof options === 'object' ? options : {};
+    return {
+      includeTime: source.includeTime === undefined
+        ? DEFAULT_EXPORT_OPTIONS.includeTime : source.includeTime === true,
+      includeAuthor: source.includeAuthor === undefined
+        ? DEFAULT_EXPORT_OPTIONS.includeAuthor : source.includeAuthor === true,
+      includeStats: source.includeStats === true,
+      includeComments: source.includeComments === true,
+    };
+  }
+
+  function normalizeDownloadMode(mode) {
+    return mode === 'embed' || mode === 'zip' ? mode : 'link';
   }
 
   // Core extraction / action orchestrators
@@ -50,25 +131,62 @@
     throw error;
   }
 
-  async function runExportJob(operation) {
-    if (activeExportController) {
+  function showExportResult(action, result) {
+    const type = result.cancelled || result.warning ? 'warning' : result.success ? 'success' : 'error';
+    const text = result.cancelled
+      ? t('export_cancelled', '导出已取消')
+      : result.warning || (result.success
+        ? action === 'copy' ? t('copy_success', '已复制 Markdown') : t('download_success', '下载成功')
+        : result.error || t('download_failed', '下载失败'));
+    ui.showResult(type, text);
+    ui.showToast(type, text);
+  }
+
+  async function runExportJob(operation, action) {
+    if (activeExportController || diagnosticBusy) {
       const error = new Error(t('export_busy', '已有导出任务正在进行'));
       error.code = 'EXPORT_BUSY';
       throw error;
     }
     const controller = new AbortController();
     activeExportController = controller;
+    const task = createTaskId('export');
+    exportState = {
+      taskId: task.taskId,
+      taskStartedAt: task.startedAt,
+      taskType: 'export',
+      action,
+      text: t('progress_extracting', '正在提取内容...'),
+      progress: null,
+      revision: protocolRevision,
+    };
+    ui.beginUiWork();
+    publishExportState();
+    let result;
     try {
-      return await operation(controller.signal);
+      result = await operation(controller.signal);
+      return result;
+    } catch (error) {
+      result = {
+        success: false,
+        cancelled: controller.signal.aborted || error?.code === 'EXPORT_CANCELLED' || error?.name === 'AbortError',
+        error: error?.message || t('download_failed', '下载失败'),
+      };
+      throw error;
     } finally {
       if (activeExportController === controller) activeExportController = null;
+      ui.endUiWork();
+      ui.refreshPanelStatus();
+      if (result) showExportResult(action, result);
+      publishExportState(result);
     }
   }
 
   function cancelActiveExport() {
-    if (!activeExportController) return false;
+    if (!activeExportController || activeExportController.signal.aborted) return false;
     activeExportController.abort('user');
     sendProgress(t('export_cancelling', '正在取消导出...'));
+    publishExportState();
     return true;
   }
 
@@ -147,10 +265,13 @@
         throwIfCancelled(signal);
         return;
       } catch (error) {
+        throwIfCancelled(signal);
         console.warn('[XPD] navigator.clipboard failed, falling back:', error.message);
       }
     }
 
+    throwIfCancelled(signal);
+    const previousFocus = document.activeElement;
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('readonly', '');
@@ -163,29 +284,32 @@
     textarea.select();
 
     try {
+      throwIfCancelled(signal);
       const copied = document.execCommand('copy');
       if (!copied) throw new Error('copy command returned false');
     } finally {
       textarea.remove();
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     }
   }
 
   async function handleExtractAndDownload(options, mode) {
+    const safeMode = normalizeDownloadMode(mode);
     return runExportJob(async (signal) => {
       const payload = await buildExportPayload(options, signal);
       const { documentModel, exportOptions } = payload;
       let exportResult;
 
-      if (mode === 'zip') {
+      if (safeMode === 'zip') {
         exportResult = await exp.downloadAsZip(documentModel, exportOptions, null, signal);
-      } else if (mode === 'embed') {
+      } else if (safeMode === 'embed') {
         exportResult = await exp.downloadAsEmbed(documentModel, exportOptions, signal);
       } else {
         exportResult = exp.downloadAsLink(documentModel, exportOptions, signal);
       }
 
       return { success: true, ...(exportResult || {}) };
-    });
+    }, 'download');
   }
 
   async function handleExtractAndCopy(options) {
@@ -196,13 +320,37 @@
       const markdown = exp.buildMarkdownAsLink(documentModel, exportOptions);
       await writeTextToClipboard(markdown, signal);
       return { success: true };
-    });
+    }, 'copy');
   }
 
   async function copyDiagnosticReport() {
-    const report = core.serializeDiagnosticReport();
-    await writeTextToClipboard(report);
-    return { success: true, report };
+    if (activeExportController || diagnosticBusy) {
+      const error = new Error(t('export_busy', '已有操作正在进行'));
+      error.code = 'EXPORT_BUSY';
+      throw error;
+    }
+    diagnosticBusy = true;
+    const task = createTaskId('diagnostic');
+    exportState = {
+      taskId: task.taskId,
+      taskStartedAt: task.startedAt,
+      taskType: 'diagnostic',
+      action: null,
+      text: '',
+      progress: null,
+      revision: protocolRevision,
+    };
+    ui.setDiagnosticBusy(true);
+    publishExportState();
+    try {
+      const report = core.serializeDiagnosticReport();
+      await writeTextToClipboard(report);
+      return { success: true, report };
+    } finally {
+      diagnosticBusy = false;
+      ui.setDiagnosticBusy(false);
+      publishExportState();
+    }
   }
 
   // Expose so UI module can call actions from the floating panel buttons.
@@ -214,9 +362,10 @@
   // Message listener
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || (sender?.id && sender.id !== chrome.runtime.id)) return false;
     if (message.type === 'PING') {
       const availability = ui.evaluatePageAvailability();
-      sendResponse({ ok: availability.ready, ...availability });
+      sendResponse({ ok: availability.ready, ...availability, ...getExportState() });
       return false;
     }
 
@@ -236,7 +385,6 @@
     }
 
     if (message.type === 'EXTRACT_AND_DOWNLOAD') {
-      ui.beginUiWork();
       handleExtractAndDownload(message.options, message.mode)
         .then((result) => sendResponse(result))
         .catch((error) => {
@@ -246,16 +394,11 @@
             cancelled: error?.code === 'EXPORT_CANCELLED',
             error: error.message,
           });
-        })
-        .finally(() => {
-          ui.endUiWork();
-          ui.refreshPanelStatus();
         });
       return true;
     }
 
     if (message.type === 'EXTRACT_AND_COPY') {
-      ui.beginUiWork();
       handleExtractAndCopy(message.options)
         .then((result) => sendResponse(result))
         .catch((error) => {
@@ -265,10 +408,6 @@
             cancelled: error?.code === 'EXPORT_CANCELLED',
             error: error.message,
           });
-        })
-        .finally(() => {
-          ui.endUiWork();
-          ui.refreshPanelStatus();
         });
       return true;
     }
@@ -282,5 +421,5 @@
   ui.startUrlWatcher();
   ui.schedulePanelStatusRefresh();
 
-  console.log('[XPD] X Markdown Exporter content script loaded');
+  console.log('[XPD] Postcase content script loaded');
 })();

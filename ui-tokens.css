@@ -1,0 +1,36 @@
+/* Shared by the toolbar popup and the injected panel; never theme the host page. */
+.xpd-surface {
+  color-scheme: light;
+  --xpd-bg: #ffffff;
+  --xpd-surface: #f5f5f4;
+  --xpd-hover: #eeeeec;
+  --xpd-text: #20201e;
+  --xpd-muted: #686864;
+  --xpd-border: #dededb;
+  --xpd-accent: #242423;
+  --xpd-accent-text: #ffffff;
+  --xpd-success: #28734c;
+  --xpd-warning: #85550f;
+  --xpd-danger: #b13434;
+  --xpd-focus: #2264c5;
+  --xpd-shadow: 0 6px 24px rgb(0 0 0 / 12%), 0 1px 3px rgb(0 0 0 / 6%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .xpd-surface {
+    color-scheme: dark;
+    --xpd-bg: #20201f;
+    --xpd-surface: #292928;
+    --xpd-hover: #343433;
+    --xpd-text: #ededea;
+    --xpd-muted: #a4a49e;
+    --xpd-border: #41413d;
+    --xpd-accent: #e8e8e3;
+    --xpd-accent-text: #20201e;
+    --xpd-success: #90c7a4;
+    --xpd-warning: #e3b76e;
+    --xpd-danger: #f29898;
+    --xpd-focus: #8db8fa;
+    --xpd-shadow: 0 6px 24px rgb(0 0 0 / 28%), 0 1px 3px rgb(0 0 0 / 12%);
+  }
+}

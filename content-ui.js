@@ -1,4 +1,4 @@
-// X Markdown Exporter - UI Module
+// Postcase - UI Module
 // Floating panel, drag interaction, status management, and chrome.storage sync.
 
 (function () {
@@ -25,18 +25,17 @@
   });
 
   const MODE_DESCS = Object.freeze({
-    link: t('mode_link_desc', '图片会保留原始链接，生成的 Markdown 最轻量。'),
-    embed: t('mode_embed_desc', '图片压缩后以内嵌方式写入 Markdown，单文件保存更省心。'),
-    zip: t('mode_zip_desc', 'Markdown 和图片一起打包成 ZIP，适合完整离线归档。'),
+    link: t('mode_link_desc', '图片保留为在线链接，文件较小。'),
+    embed: t('mode_embed_desc', '图片压缩后写入 Markdown，保存为单个文件。'),
+    zip: t('mode_zip_desc', 'Markdown 与原始图片一起打包。'),
   });
 
   const UI_TEXT = Object.freeze({
-    launcherTitle: t('launcher_title', 'X Markdown Exporter，拖动可移动'),
-    title: t('extension_name', 'X Markdown Exporter'),
-    subtitle: t('panel_subtitle', '保存当前推文或 Note'),
+    launcherTitle: t('launcher_title', 'X帖匣 · Postcase，拖动可移动'),
+    title: t('brand_name', 'X帖匣 · Postcase'),
     modeTitle: t('download_format', '导出模式'),
     checking: t('checking', '检测中...'),
-    ready: t('ready', '可以下载当前内容'),
+    ready: t('ready', '可以导出'),
     unsupported: t('unsupported', '请打开 X 推文详情页或 Note 页面'),
     notReady: t('not_ready', '正在等待推文内容加载；如果一直不动，请刷新页面或重新打开详情页'),
     unsupportedTimeline: t('unsupported_timeline', '时间线暂不直接导出；请点开某条推文详情页后再下载或复制'),
@@ -44,7 +43,8 @@
     unsupportedSearch: t('unsupported_search', '搜索页暂不直接导出；请打开搜索结果里的某条推文详情页'),
     unsupportedProfile: t('unsupported_profile', '主页暂不直接导出；请打开一条推文详情页或 Note 页面'),
     unsupportedOther: t('unsupported_other', '当前页面暂不支持导出；请打开 X 推文详情页或 Note 页面'),
-    note: t('metadata_note', '默认会附带作者和时间。'),
+    note: t('metadata_note', '附带作者、时间和原文链接'),
+    copyHint: t('copy_link_hint', '复制始终使用图片链接。'),
     download: t('download', '下载'),
     processing: t('processing', '处理中...'),
     refresh: t('refresh', '刷新'),
@@ -93,7 +93,6 @@
   const uiState = {
     root: null,
     launcher: null,
-    launcherBadge: null,
     panel: null,
     status: null,
     statusText: null,
@@ -114,12 +113,20 @@
     ready: false,
     open: false,
     busyCount: 0,
+    cancelling: false,
+    diagnosticBusy: false,
+    modeChanged: false,
+    positionChanged: false,
+    pendingMode: null,
     lastUrl: window.location.href,
     resultTimer: null,
     toastTimer: null,
     refreshTimers: [],
     urlWatcherInterval: null,
     abortController: null,
+    contentObserver: null,
+    panelObserver: null,
+    statusTimer: null,
     floatingTop: FLOATING_DEFAULT_TOP,
     floatingRight: FLOATING_DEFAULT_RIGHT,
     panelSide: 'left',
@@ -141,6 +148,12 @@
     if (uiState.abortController) {
       uiState.abortController.abort();
     }
+    uiState.contentObserver?.disconnect();
+    uiState.panelObserver?.disconnect();
+    clearScheduledPanelRefreshes();
+    window.clearTimeout(uiState.statusTimer);
+    clearResult();
+    hideToast();
     const existingRoot = document.getElementById('xpd-floating-root');
     if (existingRoot) existingRoot.remove();
     if (uiState.urlWatcherInterval) {
@@ -153,13 +166,13 @@
 
     const root = document.createElement('div');
     root.id = 'xpd-floating-root';
+    root.className = 'xpd-surface';
     root.innerHTML = getFloatingUiMarkup();
 
     (document.body || document.documentElement).appendChild(root);
 
     uiState.root = root;
     uiState.launcher = root.querySelector('[data-role="launcher"]');
-    uiState.launcherBadge = root.querySelector('[data-role="launcherBadge"]');
     uiState.panel = root.querySelector('[data-role="panel"]');
     uiState.status = root.querySelector('[data-role="status"]');
     uiState.statusText = root.querySelector('[data-role="statusText"]');
@@ -199,6 +212,8 @@
     root.querySelectorAll('[data-mode]').forEach((button) => {
       button.addEventListener('click', (event) => {
         if (!event.isTrusted) return;
+        if (uiState.busyCount > 0) return;
+        uiState.modeChanged = true;
         updateModeUi(button.dataset.mode);
       });
     });
@@ -209,20 +224,30 @@
     document.addEventListener('visibilitychange', handleVisibilityChange, { capture: true, signal });
     window.addEventListener('resize', handleViewportResize, { capture: true, signal });
 
+    const handleStorageChange = (changes, area) => {
+      if (area !== 'local' || !Object.hasOwn(changes, 'xpd_mode')) return;
+      const mode = changes.xpd_mode.newValue || 'embed';
+      if (!Object.hasOwn(MODE_DESCS, mode)) return;
+      uiState.modeChanged = true;
+      if (uiState.busyCount > 0) uiState.pendingMode = mode;
+      else updateModeUi(mode, { persist: false });
+    };
+    chrome.storage.onChanged?.addListener(handleStorageChange);
+    signal.addEventListener('abort', () => {
+      chrome.storage.onChanged?.removeListener(handleStorageChange);
+    }, { once: true });
+
     // Load settings from chrome.storage (fix #13)
     loadSettings().then((settings) => {
-      uiState.currentMode = settings.mode;
-      uiState.floatingTop = settings.top;
-      uiState.floatingRight = settings.right;
-      updateModeUi(uiState.currentMode);
-      applyFloatingPosition(
-        { top: uiState.floatingTop, right: uiState.floatingRight },
-        { persist: false, includePanel: false }
-      );
+      if (uiState.root !== root) return;
+      if (!uiState.modeChanged) updateModeUi(settings.mode, { persist: false });
+      if (!uiState.positionChanged) {
+        applyFloatingPosition(settings, { persist: false });
+      }
     });
 
     // Apply defaults immediately while storage loads
-    updateModeUi(uiState.currentMode);
+    updateModeUi(uiState.currentMode, { persist: false });
     applyFloatingPosition(
       { top: uiState.floatingTop, right: uiState.floatingRight },
       { persist: false, includePanel: false }
@@ -231,6 +256,27 @@
     updateProgressText(UI_TEXT.progressDefault);
     clearResult();
     syncUiControls();
+
+    // X can render its body long after the route changes. Ignore our own writes.
+    uiState.contentObserver = new MutationObserver((records) => {
+      if (document.hidden || !records.some((record) => !root.contains(record.target))) return;
+      const kind = core.classifyPageRoute().kind;
+      if (kind !== 'tweet' && kind !== 'article') return;
+      if (uiState.statusTimer) return;
+      uiState.statusTimer = window.setTimeout(() => {
+        uiState.statusTimer = null;
+        refreshPanelStatus();
+      }, 250);
+    });
+    uiState.contentObserver.observe(document.body || document.documentElement, {
+      childList: true, subtree: true, characterData: true,
+    });
+    if (typeof ResizeObserver !== 'undefined') {
+      uiState.panelObserver = new ResizeObserver(() => {
+        if (uiState.open) updatePanelPlacement();
+      });
+      uiState.panelObserver.observe(uiState.panel);
+    }
   }
 
   // ── Settings persistence via chrome.storage (fix #13) ──────────────
@@ -243,7 +289,7 @@
           const savedMode = result?.xpd_mode;
           const savedTop = Number(result?.[FLOATING_TOP_STORAGE_KEY]);
           const savedRight = Number(result?.[FLOATING_RIGHT_STORAGE_KEY]);
-          const mode = MODE_DESCS[savedMode] ? savedMode : 'embed';
+          const mode = Object.hasOwn(MODE_DESCS, savedMode) ? savedMode : 'embed';
           const pos = clampFloatingPosition(
             {
               top: Number.isFinite(savedTop) ? savedTop : FLOATING_DEFAULT_TOP,
@@ -272,26 +318,30 @@
 
   function getFloatingUiMarkup() {
     const h = core.escapeHtml;
+    // Generated from icons/postcase.svg by scripts/generate-brand-assets.js.
+    /* postcase-mark:start */
+    const brandMark = "<svg class=\"xpd-brand-mark\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\" fill=\"none\">\n  <rect width=\"64\" height=\"64\" rx=\"14\" fill=\"#A9D5F3\"/>\n  <path d=\"M18 10H36L46 20V38H18V10Z\" fill=\"#F7FBFF\"/>\n  <path d=\"M36 10V20H46L36 10Z\" fill=\"#669FC6\"/>\n  <path d=\"M24 25H39M24 31H34\" stroke=\"#2B5D80\" stroke-width=\"3\"/>\n  <path d=\"M12 39V50C12 52.2 13.8 54 16 54H48C50.2 54 52 52.2 52 50V39\" stroke=\"#2B5D80\" stroke-width=\"4\"/>\n</svg>";
+    /* postcase-mark:end */
     return `
-      <section class="xpd-panel" id="xpd-export-panel" data-role="panel" role="dialog" aria-labelledby="xpd-panel-title" aria-hidden="true">
+      <section class="xpd-panel" id="xpd-export-panel" data-role="panel" role="dialog" aria-labelledby="xpd-panel-title" aria-hidden="true" inert>
         <div class="xpd-panel__inner">
           <div class="xpd-header">
-            <div>
-              <h2 class="xpd-header__title" id="xpd-panel-title">${h(UI_TEXT.title)}</h2>
-              <p class="xpd-header__meta">${h(UI_TEXT.subtitle)}</p>
+            <div class="xpd-brand">
+              <span class="xpd-brand-icon" aria-hidden="true">${brandMark}</span>
+              <div><h2 class="xpd-header__title" id="xpd-panel-title">${h(UI_TEXT.title)}</h2>
+              <span class="xpd-brand-purpose">X → Markdown</span></div>
             </div>
             <button class="xpd-close" data-role="closeBtn" type="button" aria-label="${h(UI_TEXT.close)}" title="${h(UI_TEXT.close)}">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 0 0 5.7 7.11L10.59 12 5.7 16.89a1 1 0 1 0 1.41 1.41L12 13.41l4.89 4.89a1 1 0 0 0 1.41-1.41L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4Z"></path>
+                <path d="m6 6 12 12M18 6 6 18"></path>
               </svg>
             </button>
           </div>
           <div class="xpd-status xpd-status--loading" data-role="status" role="status" aria-live="polite">
-            <span class="xpd-status__dot"></span>
             <span data-role="statusText">${h(UI_TEXT.checking)}</span>
             <span class="xpd-status__type" data-role="statusKind">${h(PAGE_KIND_LABELS.other)}</span>
           </div>
-          <div class="xpd-mode-card">
+          <div class="xpd-format">
             <div class="xpd-section-title">${h(UI_TEXT.modeTitle)}</div>
             <div class="xpd-mode-selector" role="group" aria-label="${h(UI_TEXT.modeTitle)}">
               <button class="xpd-mode-btn" data-mode="link" type="button" aria-pressed="false">${h(MODE_LABELS.link)}</button>
@@ -300,12 +350,11 @@
             </div>
             <p class="xpd-mode-desc" data-role="modeDesc"></p>
           </div>
-          <div class="xpd-note">${h(UI_TEXT.note)}</div>
           <div class="xpd-actions">
             <button class="xpd-btn xpd-btn--primary" data-role="downloadBtn" type="button">${h(UI_TEXT.download)}</button>
-            <button class="xpd-btn xpd-btn--secondary" data-role="copyBtn" type="button">${h(UI_TEXT.copy)}</button>
-            <button class="xpd-btn xpd-btn--secondary" data-role="refreshBtn" type="button">${h(UI_TEXT.refresh)}</button>
+            <button class="xpd-btn xpd-btn--secondary" data-role="copyBtn" type="button" aria-describedby="xpd-copy-hint">${h(UI_TEXT.copy)}</button>
           </div>
+          <p class="xpd-note">${h(UI_TEXT.note)}<br><span id="xpd-copy-hint">${h(UI_TEXT.copyHint)}</span></p>
           <div class="xpd-progress" data-role="progress" role="status" aria-live="polite">
             <span class="xpd-spinner" aria-hidden="true"></span>
             <span class="xpd-progress__details">
@@ -314,17 +363,20 @@
             </span>
             <button class="xpd-progress__cancel" data-role="cancelBtn" type="button">${h(UI_TEXT.cancel)}</button>
           </div>
-          <button class="xpd-diagnostic" data-role="diagnosticBtn" type="button">${h(UI_TEXT.diagnostics)}</button>
           <div class="xpd-result" data-role="result" role="status" aria-live="polite"></div>
+          <div class="xpd-footer">
+            <span>v${h(chrome.runtime.getManifest().version)}</span>
+            <div class="xpd-footer__tools">
+              <button class="xpd-text-btn" data-role="refreshBtn" type="button">${h(UI_TEXT.refresh)}</button>
+              <button class="xpd-text-btn" data-role="diagnosticBtn" type="button">${h(UI_TEXT.diagnostics)}</button>
+            </div>
+          </div>
         </div>
       </section>
       <button class="xpd-launcher" data-role="launcher" type="button" aria-label="${h(UI_TEXT.launcherTitle)}" aria-controls="xpd-export-panel" aria-expanded="false" title="${h(UI_TEXT.launcherTitle)}">
         <span class="xpd-launcher__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24">
-            <path d="M12 3a1 1 0 0 1 1 1v8.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V4a1 1 0 0 1 1-1Zm-7 15a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z"></path>
-          </svg>
+          ${brandMark}
         </span>
-        <span class="xpd-launcher__badge" data-role="launcherBadge" data-state="loading"></span>
       </button>
       <div class="xpd-toast" data-role="toast" role="status" aria-live="polite"></div>
     `;
@@ -332,10 +384,10 @@
 
   // ── Mode management ────────────────────────────────────────────────
 
-  function updateModeUi(mode) {
-    if (!MODE_DESCS[mode]) return;
+  function updateModeUi(mode, { persist = true } = {}) {
+    if (!Object.hasOwn(MODE_DESCS, mode)) return;
     uiState.currentMode = mode;
-    saveMode(mode);
+    if (persist) saveMode(mode);
     if (uiState.root) {
       uiState.root.querySelectorAll('[data-mode]').forEach((button) => {
         const active = button.dataset.mode === mode;
@@ -377,6 +429,7 @@
   }
 
   function handleLauncherPointerMove(event) {
+    if (!event.isTrusted) return;
     if (event.pointerId !== uiState.dragPointerId) return;
     const deltaX = event.clientX - uiState.dragStartX;
     const deltaY = event.clientY - uiState.dragStartY;
@@ -384,6 +437,7 @@
 
     if (!uiState.dragMoved) {
       uiState.dragMoved = true;
+      uiState.positionChanged = true;
       if (uiState.root) uiState.root.classList.add('xpd-dragging');
       if (uiState.open) setPanelOpen(false);
     }
@@ -395,6 +449,7 @@
   }
 
   function handleLauncherPointerEnd(event) {
+    if (!event.isTrusted) return;
     if (event.pointerId !== uiState.dragPointerId) return;
     if (uiState.launcher?.hasPointerCapture?.(event.pointerId)) {
       uiState.launcher.releasePointerCapture(event.pointerId);
@@ -415,7 +470,10 @@
   }
 
   function handleDocumentKeydown(event) {
-    if (event.key === 'Escape' && uiState.open) {
+    if (!event.isTrusted) return;
+    if (event.key === 'Escape' && uiState.open && uiState.root?.contains(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
       setPanelOpen(false);
       uiState.launcher?.focus({ preventScroll: true });
     }
@@ -434,6 +492,7 @@
 
   function handleRefreshClick(event) {
     if (!event?.isTrusted) return;
+    if (uiState.busyCount > 0 || uiState.diagnosticBusy) return;
     setStatus('loading', UI_TEXT.refreshLoading);
     window.location.reload();
   }
@@ -450,8 +509,8 @@
   }
 
   async function handleDiagnosticClick(event) {
-    if (!event?.isTrusted || uiState.busyCount > 0) return;
-    if (uiState.diagnosticBtn) uiState.diagnosticBtn.disabled = true;
+    if (!event?.isTrusted || uiState.busyCount > 0 || uiState.diagnosticBusy) return;
+    clearResult();
     try {
       await _XPD.copyDiagnosticReport();
       showResult('success', UI_TEXT.diagnosticsCopied);
@@ -459,101 +518,59 @@
     } catch {
       showResult('error', UI_TEXT.diagnosticsFailed);
       showToast('error', UI_TEXT.diagnosticsFailed);
-    } finally {
-      if (uiState.diagnosticBtn) uiState.diagnosticBtn.disabled = false;
     }
   }
 
-  async function handleFloatingDownload(event) {
+  async function runFloatingAction(event, action) {
     if (!event?.isTrusted) return;
+    if (uiState.busyCount > 0 || uiState.diagnosticBusy) return;
     const availability = refreshPanelStatus();
     if (!availability.ready) {
-      showResult('error', availability.message);
-      showToast('error', availability.message);
+      showResult('warning', availability.message);
       return;
     }
-    beginUiWork();
     try {
-      const response = await _XPD.handleExtractAndDownload(
-        { includeAuthor: true, includeTime: true, includeStats: false, includeComments: false },
-        uiState.currentMode
-      );
-      if (response?.success) {
-        const type = response.warning ? 'warning' : 'success';
-        const message = response.warning
-          ? `${UI_TEXT.downloadWarning}：${response.warning}`
-          : UI_TEXT.downloadSuccess;
-        showResult(type, message);
-        showToast(type, message);
-      } else {
-        const message = response?.error || UI_TEXT.downloadFailed;
-        showResult('error', message);
-        showToast('error', message);
-      }
-    } catch (error) {
-      const cancelled = error?.code === 'EXPORT_CANCELLED' || error?.name === 'AbortError';
-      const message = cancelled
-        ? UI_TEXT.cancelled
-        : error?.message
-          ? `${UI_TEXT.downloadFailed}: ${error.message}`
-          : UI_TEXT.downloadFailed;
-      showResult(cancelled ? 'warning' : 'error', message);
-      showToast(cancelled ? 'warning' : 'error', message);
-    } finally {
-      endUiWork();
-      refreshPanelStatus();
+      // The entry point owns the job state and result for both UI entry points.
+      await action();
+    } catch {
+      // runExportJob has already displayed the failure or cancellation.
     }
   }
 
-  async function handleFloatingCopy(event) {
-    if (!event?.isTrusted) return;
-    const availability = refreshPanelStatus();
-    if (!availability.ready) {
-      showResult('error', availability.message);
-      showToast('error', availability.message);
-      return;
-    }
-    beginUiWork();
-    try {
-      const response = await _XPD.handleExtractAndCopy(
-        { includeAuthor: true, includeTime: true, includeStats: false, includeComments: false }
-      );
-      if (response?.success) {
-        showResult('success', UI_TEXT.copySuccess);
-        showToast('success', UI_TEXT.copySuccess);
-      } else {
-        const message = response?.error || UI_TEXT.copyFailed;
-        showResult('error', message);
-        showToast('error', message);
-      }
-    } catch (error) {
-      const cancelled = error?.code === 'EXPORT_CANCELLED' || error?.name === 'AbortError';
-      const message = cancelled
-        ? UI_TEXT.cancelled
-        : error?.message ? `${UI_TEXT.copyFailed}: ${error.message}` : UI_TEXT.copyFailed;
-      showResult(cancelled ? 'warning' : 'error', message);
-      showToast(cancelled ? 'warning' : 'error', message);
-    } finally {
-      endUiWork();
-      refreshPanelStatus();
-    }
+  function handleFloatingDownload(event) {
+    return runFloatingAction(event, () => _XPD.handleExtractAndDownload(
+      { includeAuthor: true, includeTime: true, includeStats: false, includeComments: false },
+      uiState.currentMode
+    ));
+  }
+
+  function handleFloatingCopy(event) {
+    return runFloatingAction(event, () => _XPD.handleExtractAndCopy(
+      { includeAuthor: true, includeTime: true, includeStats: false, includeComments: false }
+    ));
   }
 
   // ── Panel open/close ───────────────────────────────────────────────
 
   function setPanelOpen(nextOpen) {
-    uiState.open = Boolean(nextOpen);
-    if (uiState.root) uiState.root.classList.toggle('xpd-open', uiState.open);
-    if (uiState.panel) uiState.panel.setAttribute('aria-hidden', String(!uiState.open));
-    if (uiState.launcher) uiState.launcher.setAttribute('aria-expanded', String(uiState.open));
-
-    if (uiState.open) {
+    const open = Boolean(nextOpen);
+    if (!open && uiState.panel?.contains(document.activeElement)) {
+      uiState.launcher?.focus({ preventScroll: true });
+    }
+    uiState.open = open;
+    if (uiState.panel) {
+      uiState.panel.inert = !open;
+      uiState.panel.setAttribute('aria-hidden', String(!open));
+    }
+    uiState.launcher?.setAttribute('aria-expanded', String(open));
+    if (open) {
+      hideToast();
+      updatePanelPlacement();
+    }
+    uiState.root?.classList.toggle('xpd-open', open);
+    if (open) {
       window.requestAnimationFrame(() => {
-        applyFloatingPosition(
-          { top: uiState.floatingTop, right: uiState.floatingRight },
-          { persist: false, includePanel: true }
-        );
-        uiState.closeBtn?.focus({ preventScroll: true });
+        if (uiState.open) uiState.closeBtn?.focus({ preventScroll: true });
       });
     }
   }
@@ -562,36 +579,59 @@
 
   function beginUiWork() {
     uiState.busyCount += 1;
+    uiState.cancelling = false;
     clearResult();
+    hideToast();
     syncUiControls();
   }
 
   function endUiWork() {
     uiState.busyCount = Math.max(0, uiState.busyCount - 1);
-    if (uiState.busyCount === 0) updateProgressText(UI_TEXT.progressDefault, null);
+    if (uiState.busyCount === 0) {
+      uiState.cancelling = false;
+      updateProgressText(UI_TEXT.progressDefault, null);
+      if (uiState.pendingMode) {
+        updateModeUi(uiState.pendingMode, { persist: false });
+        uiState.pendingMode = null;
+      }
+    }
     syncUiControls();
   }
 
   function syncUiControls() {
     const isBusy = uiState.busyCount > 0;
+    const controlsLocked = isBusy || uiState.diagnosticBusy;
     if (uiState.downloadBtn) {
-      uiState.downloadBtn.disabled = isBusy || !uiState.ready;
+      uiState.downloadBtn.disabled = controlsLocked || !uiState.ready;
       uiState.downloadBtn.textContent = isBusy ? UI_TEXT.processing : UI_TEXT.download;
     }
     if (uiState.copyBtn) {
-      uiState.copyBtn.disabled = isBusy || !uiState.ready;
+      uiState.copyBtn.disabled = controlsLocked || !uiState.ready;
       uiState.copyBtn.textContent = UI_TEXT.copy;
     }
     if (uiState.cancelBtn) {
-      uiState.cancelBtn.disabled = !isBusy;
-      uiState.cancelBtn.textContent = UI_TEXT.cancel;
+      uiState.cancelBtn.disabled = !isBusy || uiState.cancelling;
+      uiState.cancelBtn.textContent = uiState.cancelling ? UI_TEXT.cancelling : UI_TEXT.cancel;
     }
-    if (uiState.diagnosticBtn) uiState.diagnosticBtn.disabled = isBusy;
+    if (uiState.diagnosticBtn) uiState.diagnosticBtn.disabled = controlsLocked;
+    if (uiState.refreshBtn) uiState.refreshBtn.disabled = controlsLocked;
+    uiState.root?.querySelectorAll('[data-mode]').forEach((button) => {
+      button.disabled = controlsLocked;
+    });
     if (uiState.progress) uiState.progress.classList.toggle('xpd-show', isBusy);
     if (uiState.launcher) uiState.launcher.classList.toggle('xpd-busy', isBusy);
   }
 
+  function setDiagnosticBusy(busy) {
+    uiState.diagnosticBusy = Boolean(busy);
+    syncUiControls();
+  }
+
   function updateProgressText(text, progress = null) {
+    if (text === UI_TEXT.cancelling) {
+      uiState.cancelling = true;
+      syncUiControls();
+    }
     if (uiState.progressText) uiState.progressText.textContent = text || UI_TEXT.progressDefault;
     if (uiState.progressBar) {
       const completed = Number(progress?.completed);
@@ -613,7 +653,10 @@
     if (uiState.resultTimer) window.clearTimeout(uiState.resultTimer);
     uiState.result.className = `xpd-result xpd-result--${type} xpd-show`;
     uiState.result.textContent = text;
-    uiState.resultTimer = window.setTimeout(() => clearResult(), 4000);
+    uiState.resultTimer = type === 'success'
+      ? window.setTimeout(() => clearResult(), 4000)
+      : null;
+    if (uiState.open) updatePanelPlacement();
   }
 
   function clearResult() {
@@ -625,10 +668,11 @@
 
   function showToast(type, text) {
     if (!uiState.toast) return;
+    if (uiState.open) return;
     if (uiState.toastTimer) window.clearTimeout(uiState.toastTimer);
     uiState.toast.className = `xpd-toast xpd-toast--${type} xpd-show`;
     uiState.toast.textContent = text;
-    uiState.toastTimer = window.setTimeout(() => hideToast(), 3200);
+    uiState.toastTimer = window.setTimeout(() => hideToast(), 5000);
   }
 
   function hideToast() {
@@ -676,9 +720,7 @@
     if (!(root instanceof Element || root instanceof Document)) return urls;
     root.querySelectorAll(dom.css.mediaImage).forEach((img) => {
       const src = img.getAttribute('src') || img.src || '';
-      if (!src || src.includes('profile_images') || src.includes('emoji') || src.includes('icon')) {
-        return;
-      }
+      if (!src) return;
       urls.add(core.upgradeImageUrl(src));
     });
     return urls;
@@ -690,13 +732,7 @@
 
   function countArticleMediaImages() {
     const urls = new Set();
-    const containers = document.querySelectorAll(dom.css.articleContent);
-    if (containers.length > 0) {
-      containers.forEach((container) => collectTweetMediaImageUrls(container, urls));
-      return urls.size;
-    }
-    const primaryColumn = document.querySelector(dom.css.primaryColumn);
-    collectTweetMediaImageUrls(primaryColumn || document, urls);
+    core.getArticleContext().containers.forEach((container) => collectTweetMediaImageUrls(container, urls));
     return urls.size;
   }
 
@@ -706,30 +742,13 @@
 
   function hasPreviewCard(mainTweetEl) {
     if (!(mainTweetEl instanceof Element)) return false;
-    return Array.from(mainTweetEl.querySelectorAll(`a[href], ${dom.css.cardMarker}`)).some((el) => {
-      if (el.closest?.(dom.css.tweetText)) return false;
-      if (el.closest?.(dom.css.author)) return false;
-      if (el.closest?.(dom.css.actionGroup)) return false;
-      if (el.querySelector?.('time')) return false;
-      const isCardMarked = el.getAttribute?.(dom.attributes.testId)
-        ?.toLowerCase()
-        .includes(dom.tokens.card);
-      const href = el.getAttribute?.('href') || '';
-      const normalizedHref = core.normalizeAnchorUrl(href);
-      if (/\/(status\/\d+|photo\/\d+|video\/\d+)/i.test(normalizedHref)) {
-        return Boolean(isCardMarked);
-      }
-      return (
-        isCardMarked ||
-        href.includes('t.co') ||
-        Boolean(normalizedHref && !/https:\/\/(x\.com|twitter\.com)\//i.test(normalizedHref))
-      );
-    });
+    return Array.from(mainTweetEl.querySelectorAll('a[href]')).some(core.isPreviewCardAnchor);
   }
 
   function countThreadTweets(mainTweetEl) {
     if (!(mainTweetEl instanceof Element)) return 0;
     const authorHandle = core.extractAuthorInfo(mainTweetEl).handle;
+    if (!authorHandle || authorHandle === '@unknown') return 0;
     const articles = getTopLevelTweetArticles();
     const mainIndex = articles.indexOf(mainTweetEl);
     if (mainIndex < 0) return 0;
@@ -737,6 +756,7 @@
     let count = 0;
     for (let i = mainIndex + 1; i < articles.length; i += 1) {
       if (core.extractAuthorInfo(articles[i]).handle !== authorHandle) break;
+      if (!core.hasVerifiedThreadRelation?.(articles[i], authorHandle)) break;
       count += 1;
     }
     return count;
@@ -774,7 +794,7 @@
     if (uiState.status) uiState.status.className = `xpd-status xpd-status--${type}`;
     if (uiState.statusText) uiState.statusText.textContent = text;
     if (uiState.statusKind) uiState.statusKind.textContent = kindLabel || PAGE_KIND_LABELS.other;
-    if (uiState.launcherBadge) uiState.launcherBadge.dataset.state = type;
+    if (uiState.launcher) uiState.launcher.dataset.state = type;
   }
 
   function evaluatePageAvailability() {
@@ -871,14 +891,11 @@
     return window.innerWidth <= 760 ? 8 : 10;
   }
 
-  function clampFloatingPosition(position, includePanel) {
+  function clampFloatingPosition(position) {
     const padding = getFloatingPadding();
-    const { width: launcherWidth, height: launcherHeight } = getLauncherMetrics();
-    const floatingHeight = includePanel
-      ? Math.max(uiState.panel?.offsetHeight || 336, launcherHeight)
-      : launcherHeight;
-    const maxTop = Math.max(padding, window.innerHeight - floatingHeight - padding);
-    const maxRight = Math.max(padding, window.innerWidth - launcherWidth - padding);
+    const { width, height } = getLauncherMetrics();
+    const maxTop = Math.max(padding, window.innerHeight - height - padding);
+    const maxRight = Math.max(padding, window.innerWidth - width - padding);
     return {
       top: Math.min(Math.max(position.top, padding), maxTop),
       right: Math.min(Math.max(position.right, padding), maxRight),
@@ -886,26 +903,38 @@
   }
 
   function updatePanelPlacement() {
-    if (!uiState.root) return;
+    if (!uiState.root || !uiState.panel) return;
     const padding = getFloatingPadding();
     const gap = getPanelGap();
-    const { width: launcherWidth } = getLauncherMetrics();
+    const { width: launcherWidth, height: launcherHeight } = getLauncherMetrics();
     const viewportWidth = window.innerWidth;
-    const maxPanelWidth = Math.min(300, Math.max(180, viewportWidth - padding * 2));
-    const availableLeft = Math.max(
-      180, viewportWidth - uiState.floatingRight - launcherWidth - gap - padding
-    );
-    const availableRight = Math.max(180, uiState.floatingRight - gap - padding);
-    const nextSide =
-      availableLeft >= maxPanelWidth || availableLeft >= availableRight ? 'left' : 'right';
-    const availableForSide = nextSide === 'left' ? availableLeft : availableRight;
-    const nextWidth = Math.max(180, Math.min(maxPanelWidth, availableForSide));
+    const viewportHeight = window.innerHeight;
+    const width = Math.max(1, Math.min(320, viewportWidth - padding * 2));
+    const maxHeight = Math.max(1, viewportHeight - padding * 2);
+    uiState.root.style.setProperty('--xpd-panel-width', `${width}px`);
+    uiState.panel.style.maxHeight = `${maxHeight}px`;
+    const height = Math.min(uiState.panel.offsetHeight || 360, maxHeight);
+    const launcherLeft = viewportWidth - uiState.floatingRight - launcherWidth;
+    const leftRoom = launcherLeft - gap - padding;
+    const rightRoom = uiState.floatingRight - gap - padding;
+    let left;
+    let top = uiState.floatingTop;
 
-    uiState.panelSide = nextSide;
-    uiState.root.classList.toggle('xpd-panel-side-left', nextSide === 'left');
-    uiState.root.classList.toggle('xpd-panel-side-right', nextSide === 'right');
-    uiState.root.style.setProperty('--xpd-panel-gap', `${gap}px`);
-    uiState.root.style.setProperty('--xpd-panel-width', `${Math.round(nextWidth)}px`);
+    if (leftRoom >= width) {
+      left = launcherLeft - gap - width;
+    } else if (rightRoom >= width) {
+      left = launcherLeft + launcherWidth + gap;
+    } else {
+      // At narrow widths, keep a readable panel and place it above/below the handle.
+      left = Math.min(Math.max(padding, launcherLeft + launcherWidth - width), viewportWidth - width - padding);
+      const below = uiState.floatingTop + launcherHeight + gap;
+      top = below + height <= viewportHeight - padding
+        ? below
+        : uiState.floatingTop - gap - height;
+    }
+    top = Math.min(Math.max(top, padding), Math.max(padding, viewportHeight - height - padding));
+    uiState.root.style.setProperty('--xpd-panel-left', `${Math.round(left)}px`);
+    uiState.root.style.setProperty('--xpd-panel-top', `${Math.round(top)}px`);
   }
 
   function applyFloatingPosition(position, options = {}) {
@@ -960,6 +989,7 @@
     refreshPanelStatus,
     beginUiWork,
     endUiWork,
+    setDiagnosticBusy,
     updateProgressText,
     showResult,
     showToast,
