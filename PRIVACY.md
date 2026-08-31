@@ -1,10 +1,10 @@
 # Privacy Policy / 隐私政策
 
-Last updated: 2026-08-21
+Last updated: 2026-09-01
 
 ## 中文
 
-X Markdown Exporter 是一个用于将 X/Twitter 推文、线程和 Note 转换为 Markdown 的浏览器扩展。
+X帖匣 · Postcase（原 X Markdown Exporter）是一个用于将 X/Twitter 推文、线程和 Note 转换为 Markdown 的浏览器扩展。
 
 本扩展会在受支持的 X/Twitter 页面中进行轻量的本地页面检测，用于判断当前页面类型、内容是否已加载，以及是否包含线程、图片、引用推文或外链卡片。完整正文提取和 Markdown 转换仅在用户主动点击“复制”或“下载”时进行。
 
@@ -38,7 +38,7 @@ https://github.com/rowanjove/x-markdown-exporter/issues
 
 ## English
 
-X Markdown Exporter is a browser extension that converts X/Twitter posts, threads, and Notes into Markdown.
+Postcase (formerly X Markdown Exporter) is a browser extension that converts X/Twitter posts, threads, and Notes into Markdown.
 
 On supported X/Twitter pages, the extension performs lightweight local page checks to determine the page type, loading state, and whether the page contains a thread, images, a quoted post, or a link card. Full-text extraction and Markdown conversion occur only when the user explicitly clicks "Copy" or "Download".
 

@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>X Markdown Exporter Browser Fixture</title>
+  <title>Postcase Browser Fixture</title>
+  <link rel="stylesheet" href="/ui-tokens.css">
   <link rel="stylesheet" href="/content.css">
+  <link rel="stylesheet" href="/__fixture__/theme.css">
   <style>
     body {
       margin: 0;
@@ -58,7 +60,7 @@
     <pre id="fixture-download" aria-live="polite"></pre>
   </main>
 
-  <script src="/__fixture__/locale-en.js"></script>
+  <script src="/__fixture__/locale.js"></script>
   <script>
     (() => {
       const store = {};
@@ -70,7 +72,7 @@
           getMessage(key) {
             return window.__XPD_MESSAGES__?.[key]?.message || '';
           },
-          getUILanguage: () => 'en-US',
+          getUILanguage: () => window.__XPD_LANGUAGE__,
         },
         storage: {
           local: {
@@ -89,7 +91,7 @@
           },
         },
         runtime: {
-          getManifest: () => ({ version: '1.7.0' }),
+          getManifest: () => window.__XPD_MANIFEST__,
           onMessage: { addListener: (listener) => messageListeners.push(listener) },
           sendMessage(message, callback) {
             if (message?.type === 'FETCH_IMAGE') {

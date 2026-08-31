@@ -29,6 +29,17 @@ function collectFiles(directory, baseDirectory = directory) {
   return files;
 }
 
+function collectReleaseSourceFiles() {
+  return releaseEntries.flatMap((entry) => {
+    const absolutePath = path.join(projectRoot, entry);
+    if (fs.statSync(absolutePath).isDirectory()) return collectFiles(absolutePath, projectRoot);
+    return [{
+      absolutePath,
+      relativePath: path.relative(projectRoot, absolutePath).replaceAll(path.sep, '/'),
+    }];
+  });
+}
+
 function verifySourceMetadata() {
   if (!/^\d+(?:\.\d+){0,3}$/.test(manifest.version)) {
     throw new Error(`Manifest version is not Chrome-compatible: ${manifest.version}`);
@@ -76,20 +87,26 @@ async function verifyArtifact(outputRoot) {
     throw new Error('SHA-256 sidecar does not match the ZIP artifact');
   }
 
-  const sourceFiles = collectFiles(releaseDir);
+  const sourceFiles = collectReleaseSourceFiles();
   const expectedPaths = sourceFiles.map((file) => file.relativePath).sort();
+  const stagedPaths = collectFiles(releaseDir).map((file) => file.relativePath).sort();
+  if (JSON.stringify(stagedPaths) !== JSON.stringify(expectedPaths)) {
+    throw new Error('Release directory contents differ from the source whitelist');
+  }
   const zip = await JSZip.loadAsync(archiveBuffer);
   const actualPaths = Object.values(zip.files)
     .filter((entry) => !entry.dir)
     .map((entry) => entry.name)
     .sort();
   if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
-    throw new Error('ZIP contents differ from the release directory whitelist');
+    throw new Error('ZIP contents differ from the source whitelist');
   }
 
   for (const file of sourceFiles) {
     const archived = await zip.file(file.relativePath).async('nodebuffer');
     const source = fs.readFileSync(file.absolutePath);
+    const staged = fs.readFileSync(path.join(releaseDir, file.relativePath));
+    if (!staged.equals(source)) throw new Error(`Release byte mismatch: ${file.relativePath}`);
     if (!archived.equals(source)) throw new Error(`ZIP byte mismatch: ${file.relativePath}`);
   }
   if (actualPaths.some((name) =>

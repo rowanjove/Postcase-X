@@ -1,4 +1,4 @@
-// X Markdown Exporter - versioned X DOM selector adapter.
+// Postcase - versioned X DOM selector adapter.
 
 (function () {
   'use strict';
@@ -6,17 +6,22 @@
   const _XPD = (window._XPD = window._XPD || {});
   const css = Object.freeze({
     tweetArticle: 'article[data-testid="tweet"]',
+    quotedContent: '[role="link"], [data-testid="quoteTweet"]',
     author: '[data-testid="User-Name"]',
+    authorAvatar: '[data-testid="Tweet-User-Avatar"]',
     tweetText: '[data-testid="tweetText"]',
+    socialContext: '[data-testid="socialContext"]',
     tweetPhotoImage: '[data-testid="tweetPhoto"] img',
     mediaImage: 'img[src*="pbs.twimg.com/media"]',
     articleContent:
       '[data-testid="article-content"], ' +
       '[data-testid="noteContent"], ' +
       '[data-testid="richTextContainer"]',
+    articleBody: '[data-testid="article-content"], [data-testid="noteContent"]',
+    editableContent: '[contenteditable="true"], [role="textbox"]',
     primaryColumn: '[data-testid="primaryColumn"]',
     actionGroup: '[role="group"][id]',
-    actionButton: '[role="button"]',
+    actionButton: 'button, [role="button"]',
     time: 'time[datetime]',
     cardMarker: '[data-testid*="card"]',
   });

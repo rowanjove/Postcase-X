@@ -5,7 +5,12 @@ const path = require('node:path');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const RELEASE_FILES = require('../../scripts/release-files.json');
+const { version } = require('../../manifest.json');
 const STATUS_ID = '987654321';
+const FIXTURE_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64'
+);
 
 function copyExtensionFixture(targetDirectory) {
   fs.mkdirSync(targetDirectory, { recursive: true });
@@ -37,6 +42,9 @@ function anonymousTweetFixture() {
         <div data-testid="tweetText" lang="en">
           Extension-level export fixture with <a href="https://example.com/reference">a link</a>.
         </div>
+        <div data-testid="tweetPhoto">
+          <img src="https://pbs.twimg.com/media/extension-fixture.png?format=png&amp;name=small" alt="Extension fixture image">
+        </div>
       </article>
     </main>
   </body>
@@ -51,6 +59,7 @@ test('loads the packaged MV3 extension and exports through its injected UI', asy
   copyExtensionFixture(extensionDirectory);
 
   let context;
+  let backgroundImageRequests = 0;
   try {
     context = await chromium.launchPersistentContext(userDataDirectory, {
       channel: 'chromium',
@@ -68,6 +77,10 @@ test('loads the packaged MV3 extension and exports through its injected UI', asy
         body: anonymousTweetFixture(),
       })
     );
+    await context.route('https://pbs.twimg.com/**', (route) => {
+      backgroundImageRequests += 1;
+      return route.fulfill({ status: 200, contentType: 'image/png', body: FIXTURE_PNG });
+    });
 
     const page = await context.newPage();
     await page.goto(`https://x.com/fixture_author/status/${STATUS_ID}`);
@@ -76,6 +89,7 @@ test('loads the packaged MV3 extension and exports through its injected UI', asy
     await expect(launcher).toBeVisible();
     await launcher.click();
     await expect(page.locator('#xpd-floating-root [data-role="downloadBtn"]')).toBeEnabled();
+    await page.locator('#xpd-floating-root [data-mode="embed"]').click();
 
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#xpd-floating-root [data-role="downloadBtn"]').click();
@@ -87,6 +101,8 @@ test('loads the packaged MV3 extension and exports through its injected UI', asy
     expect(markdown).toContain('Extension-level export fixture');
     expect(markdown).toContain('Fixture Author (@fixture\\_author)');
     expect(markdown).toContain(`https://x.com/fixture_author/status/${STATUS_ID}`);
+    expect(markdown).toContain('data:image/png;base64,');
+    expect(backgroundImageRequests).toBeGreaterThan(0);
 
     let serviceWorker = context.serviceWorkers()[0];
     if (!serviceWorker) serviceWorker = await context.waitForEvent('serviceworker');
@@ -95,7 +111,7 @@ test('loads the packaged MV3 extension and exports through its injected UI', asy
 
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-    await expect(popup.locator('#versionText')).toHaveText('v1.7.0');
+    await expect(popup.locator('#versionText')).toHaveText(`v${version}`);
     await expect(popup.locator('#downloadBtn')).toBeVisible();
   } finally {
     await context?.close();

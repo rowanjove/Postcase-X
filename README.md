@@ -1,16 +1,41 @@
-# X Markdown Exporter
+# X帖匣 · Postcase
 
-![X Markdown Exporter Social Preview](assets/social-preview.png)
+<img src="assets/social-preview.png" alt="X帖匣 · Postcase：把帖子收进自己的文件" width="600">
 
 [中文](#chinese) | [English](#english)
 
-X Markdown Exporter 是一款 Chrome / Edge 扩展，可将 X（Twitter）推文、线程和长文 Note 复制或归档为 Markdown，方便投喂 AI 工具和整理本地知识库。
+原名 X Markdown Exporter。本次品牌更新尚未发布到商店；仓库地址、扩展身份和已保存设置保持不变。
 
-English: Copy and archive X (Twitter) posts, threads, and long-form Notes as Markdown for AI tools and local knowledge workflows.
+Previously X Markdown Exporter. The new branding is not yet published to the store; repository links, extension identity, and saved preferences remain unchanged.
+
+名称、配色和图标维护方式见 [品牌说明 / Brand guide](BRAND.md)。
+
+将 X（Twitter）推文、线程和长文保存为 Markdown。可复制文本、内嵌图片，或打包为 ZIP；在浏览器本地处理。
+
+English: Save X (Twitter) posts, threads, and articles as Markdown. Copy text, embed images, or download a ZIP. Processing stays in your browser.
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/x-markdown-exporter/alicknocngkldhijfocddaepnfpgjlee) | [GitHub Releases](https://github.com/rowanjove/x-markdown-exporter/releases)
 
 ## 最新更新 / Latest Update
+
+### v1.8.0 · 2026-09-01
+
+[下载 v1.8.0 / Download](https://github.com/rowanjove/x-markdown-exporter/releases/tag/v1.8.0)
+
+- 新名称 **X帖匣 · Postcase**，浅蓝图标，提供 16/32/48/128px 图标及 SVG 源文件。
+
+- 重构工具栏弹窗和悬浮窗：共用明暗主题，简化操作层级，移除渐变、玻璃效果和重复提示。
+- 修复错误目标提取、引用内容越界、取消复制、跨标签进度和任务重连；补齐界面与发布校验回归。
+- 首批修复富文本包装容器的段落与标题展平，保留代码块、有序列表起点和嵌套列表结构。
+- 互动统计首批按语义标签识别原生按钮、按钮换序和常见本地化数量。
+- 导出状态增加版本、任务 ID 和单调修订号，旧任务的延迟消息不会覆盖新任务。
+- `embed` / `zip` 单次最多处理 500 张图片、累计媒体字节不超过 64 MiB，超限会明确停止。
+- 后台跨标签最多同时抓取 6 张图片，额外请求进入可取消队列；页面导航或标签关闭时会主动清理。
+- ZIP 压缩阶段响应取消；大图从 embed 自动切换 ZIP 时会逐张释放临时数据，并复用已失败图片的远程链接。
+- 图片转码限制为最多 8 MP canvas，并在每张图完成后释放像素缓冲；队列记录高水位、等待和拒绝计数，队列满时保留远程链接。
+- 完整发现与剩余问题见 [代码审查](CODE_REVIEW.md)，后续优先级与验收标准见 [升级计划](IMPROVEMENT_PLAN.md)。
+
+English: a simpler interface, safer extraction boundaries, reliable task state and cancellation, and stronger release verification. These changes are not yet published.
 
 ### v1.7.0
 
@@ -23,6 +48,14 @@ English summary: localization, safer structured extraction, cancellable image ex
 
 ## 预览 / Preview
 
+浅色与深色弹窗，使用实际界面代码和本地匿名示例数据。悬浮面板采用相同的颜色和控件样式。
+
+<img src="assets/popup-preview.png" alt="中文浅色弹窗" width="340"> <img src="assets/popup-dark-preview.png" alt="中文深色弹窗" width="340">
+
+<img src="assets/release-preview.png" alt="v1.8.0 浅色、深色和悬浮窗实际界面" width="960">
+
+截图使用本地匿名示例数据；可运行 `npm run screenshots` 重拍。
+
 ### 导出示例 / Export Example
 
 ![Export Example](assets/export-example.png)
@@ -33,16 +66,16 @@ English summary: localization, safer structured extraction, cancellable image ex
 
 ### 这是什么
 
-这是一个把 X / Twitter 推文、线程和 Note 转成 Markdown 的浏览器扩展。它的核心定位很直接：当你想把一些推特内容喂给 OpenClaw、Claude Code、Claude、ChatGPT 等工具时，不必和网页反爬、复制断行、图片链接丢失这些细碎问题纠缠，直接复制一份结构清晰的 Markdown 就能作为上下文使用。
+这是一个将当前页面已加载的 X 内容转换为 Markdown 的 Chrome / Edge 扩展。打开推文或长文详情页，选择格式即可复制或下载。
 
-它也适合本地归档。很多长文、线程和高质量推文值得保存到 Obsidian、Notion、本地知识库或项目资料夹里，X Markdown Exporter 可以把正文、图片、引用推文、外链卡片和来源信息尽量整理成更耐用的 Markdown。
+导出的正文、图片、引用与来源信息可用于本地阅读、笔记和资料整理。不需要后端服务，也不会自动上传内容。
 
 ### 亮点
 
 - 支持 X / Twitter 推文详情页和 Note 页面导出
 - 页面内右侧悬浮按钮，支持横向和纵向拖动，自动记住位置
 - 点击后弹出小面板，直接选择导出模式
-- 一键复制 Markdown 文本，适合快速投喂给 OpenClaw、Claude Code 等工具
+- 直接复制 Markdown，粘贴到笔记或其他工具
 - 可在面板状态旁显示推文、文章、线程、图片数量、引用推文和外链卡片等内容标签
 - 保留正文和图片的原始顺序
 - 使用结构化内容模型保存文本、链接、图片、引用和卡片顺序，避免字符串占位符碰撞
@@ -57,8 +90,8 @@ English summary: localization, safer structured extraction, cancellable image ex
 
 ### 典型场景
 
-- 把一条推文、一个线程或一篇 Note 复制成 Markdown，直接粘贴给 OpenClaw、Claude Code 或其他 AI 编程/研究工具分析
-- 绕过网页端反爬和复制体验限制，把 X 内容稳定地转成文本上下文
+- 将推文、线程或长文复制到笔记、文档或研究工具
+- 保存当前已加载的正文与来源，减少手动复制和整理
 - 把高质量文章、教程、观点线程保存到 Obsidian、Notion、Logseq 或本地资料夹
 - 将带图片、引用推文和外链卡片的内容整理成更适合二次阅读和检索的 Markdown
 
@@ -71,7 +104,7 @@ Markdown 中保留远程图片地址，并尽量把链接卡片转成普通 Mark
 适合：
 
 - 点击 `复制` 时的默认文本形态
-- 快速投喂给 AI 工具
+- 快速复制和引用
 - 文件体积最小
 - 在线阅读或二次整理
 
@@ -104,7 +137,7 @@ Markdown 和图片分开保存，再打包成 ZIP。
 #### 方式二：从 GitHub Releases 下载
 
 1. 打开 [Releases](https://github.com/rowanjove/x-markdown-exporter/releases)
-2. 下载最新版本里的 `x-markdown-exporter-v1.7.0.zip`
+2. 下载最新版本里的 `x-markdown-exporter-v1.8.0.zip`
 3. 解压 ZIP 文件
 4. 打开扩展管理页
    Chrome: `chrome://extensions/`
@@ -112,6 +145,8 @@ Markdown 和图片分开保存，再打包成 ZIP。
 5. 开启“开发者模式”
 6. 点击“加载已解压的扩展程序”
 7. 选择解压后的目录
+
+升级已解压版本：先备份旧目录，再将新包解压到原目录并在扩展管理页点击“重新加载”，随后刷新 X 页面。不要先删除扩展；在扩展 ID 和目录不变的情况下，已有设置会保留。GitHub 安装包不会自动更新 Chrome 商店安装的版本。
 
 #### 方式三：直接克隆仓库
 
@@ -131,14 +166,19 @@ git clone https://github.com/rowanjove/x-markdown-exporter.git
 
 工具栏里的扩展弹窗仍然保留，作为备用入口。
 
+复制始终使用图片链接；所选格式只影响下载。导出进行中可以关闭并重新打开弹窗查看进度或取消。
+
 ### 项目结构
 
 ```text
 .
 ├─ manifest.json
 ├─ popup.html
+├─ popup.css
 ├─ popup.js
+├─ ui-tokens.css
 ├─ content.js
+├─ content-selectors.js
 ├─ content-core.js
 ├─ content-export.js
 ├─ content-ui.js
@@ -146,6 +186,7 @@ git clone https://github.com/rowanjove/x-markdown-exporter.git
 ├─ background.js
 ├─ jszip.min.js
 ├─ package.json
+├─ CODE_REVIEW.md
 ├─ IMPROVEMENT_PLAN.md
 ├─ scripts/
 ├─ tests/
@@ -168,6 +209,8 @@ git clone https://github.com/rowanjove/x-markdown-exporter.git
   - 负责悬浮按钮、面板、拖动交互和页面状态管理
 - `content.css`
   - 定义悬浮按钮、弹层和提示样式
+- `ui-tokens.css` / `popup.css`
+  - 共享明暗主题变量与工具栏弹窗样式
 - `background.js`
   - 负责跨域抓取图片
   - 为 `embed` 和 `zip` 模式提供 Base64 数据
@@ -179,6 +222,8 @@ git clone https://github.com/rowanjove/x-markdown-exporter.git
 - 主要面向推文详情页和 Note 页面，时间线、搜索页和主页不会直接导出；请先点开具体推文或 Note
 - 如果 X 调整 DOM 结构，提取规则可能需要跟进
 - 大多数外链预览卡可以提取，但极个别复杂卡片仍可能不完整
+- 线程收集要求已加载、同作者且有明确回复 / 线程上下文的帖子；缺少关系证据时只导出主帖，仍不保证完整会话
+- 复杂嵌套 / 有序列表及部分块级富文本可能损失结构，详见 [代码审查](CODE_REVIEW.md)
 
 ### 隐私说明
 
@@ -216,7 +261,7 @@ npm run package
 
 打包过程会逐文件验证 ZIP，并生成对应的 `.zip.sha256` 校验文件。
 
-完整改进路线见 [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)。
+完整改进路线见 [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)，本轮复现和修复记录见 [CODE_REVIEW.md](CODE_REVIEW.md)。
 
 启动真实浏览器 UI fixture：
 
@@ -224,7 +269,9 @@ npm run package
 npm run fixture
 ```
 
-然后打开 `http://127.0.0.1:4173/`，验证悬浮面板、复制和下载交互。
+然后打开 [悬浮窗测试页](http://127.0.0.1:4173/)，验证复制和下载交互。
+
+可用 [中文浅色弹窗预览](http://127.0.0.1:4173/__fixture__/popup.html?lang=zh_CN&theme=light) 检查界面，将 `theme` 改为 `dark` 可看深色。弹窗预览使用模拟的扩展 API，不会下载或复制，也不会假报成功；真实扩展行为由 MV3 测试另行验证。
 
 本地测试：
 
@@ -239,16 +286,16 @@ npm run fixture
 
 ### What It Does
 
-X Markdown Exporter turns X / Twitter posts, threads, and long-form Notes into Markdown. Its main job is practical: when you need to feed Twitter/X content into OpenClaw, Claude Code, Claude, ChatGPT, or another coding and research tool, you can copy clean Markdown directly instead of fighting page anti-scraping behavior, broken selection, or messy formatting.
+Postcase converts content already loaded on an X post or article detail page into Markdown. Open the panel, choose a format, then copy or download.
 
-It is also useful for archiving. Good posts, threads, and long-form Notes often deserve a durable local copy. X Markdown Exporter keeps the text, images, quoted posts, link cards, and source metadata in a format that works well in Obsidian, Notion, local folders, and knowledge-base workflows.
+Keep text, images, quotes, and source metadata for reading, notes, and reference. No backend service is required and content is not uploaded automatically.
 
 ### Highlights
 
 - Export X / Twitter post detail pages and Note pages
 - Draggable in-page floating launcher with saved position
 - Open a compact export panel directly on the page
-- Copy Markdown text with one click for fast AI-context handoff to OpenClaw, Claude Code, and similar tools
+- Copy Markdown directly into notes, documents, or other tools
 - Show content labels for posts, articles, threads, image counts, quoted posts, and link cards
 - Preserve the original order of text and images
 - Keep text, links, images, quotes, and cards in a structured document model instead of indexed string placeholders
@@ -260,12 +307,17 @@ It is also useful for archiving. Good posts, threads, and long-form Notes often 
 - Give clearer next-step guidance on timeline, search, profile, explore, and still-loading pages
 - Localize the interface, progress messages, filenames, and Markdown metadata for English and Simplified Chinese browser locales
 - Fetch archive images with bounded concurrency and expose progress plus cancellation in both extension interfaces
+- Include protocol version, task ID, start timestamp, and monotonic revision in export state messages so stale jobs cannot overwrite a newer task
+- Limit each `embed` / `zip` export to 500 unique images and 64 MiB of cumulative media bytes, with an explicit failure when the budget is exceeded
+- The background worker caps image fetches at six across tabs; additional requests wait in a cancellable queue that is cleared on navigation or tab close
+- Check cancellation during ZIP compression and release prepared embed data URLs as each image enters the archive
+- Bound image transcode canvases to 8 MP, record queue backpressure counters, and fall back to remote links when the global queue is full
 - Run fully in the browser with no backend service
 
 ### Common Workflows
 
-- Copy a post, thread, or Note as Markdown and paste it into OpenClaw, Claude Code, or another AI coding/research tool
-- Turn X content into stable text context without relying on brittle page scraping or manual selection
+- Copy a post, thread, or article into notes, documents, or research tools
+- Save the loaded content and source without manually rebuilding the formatting
 - Archive high-quality articles, tutorials, and opinion threads into Obsidian, Notion, Logseq, or local folders
 - Preserve content with images, quoted posts, and external link cards in a cleaner Markdown shape for later reading and search
 
@@ -278,7 +330,7 @@ Keep remote image URLs in Markdown and preserve supported external preview cards
 Best for:
 
 - the default text shape used by `Copy`
-- quickly feeding AI tools
+- quick copying and quoting
 - the smallest file size
 - online reading or lightweight notes
 
@@ -311,7 +363,7 @@ Best for:
 #### Option 2: Download from GitHub Releases
 
 1. Open [Releases](https://github.com/rowanjove/x-markdown-exporter/releases)
-2. Download `x-markdown-exporter-v1.7.0.zip`
+2. Download `x-markdown-exporter-v1.8.0.zip`
 3. Extract the ZIP file
 4. Open the extensions page
    Chrome: `chrome://extensions/`
@@ -338,14 +390,19 @@ Then load the repository folder as an unpacked extension.
 
 The toolbar popup is still available as a fallback entry point.
 
+Copy always uses image links; the selected format only affects downloads. You can close and reopen the popup to check or cancel an active export.
+
 ### Project Structure
 
 ```text
 .
 ├─ manifest.json
 ├─ popup.html
+├─ popup.css
 ├─ popup.js
+├─ ui-tokens.css
 ├─ content.js
+├─ content-selectors.js
 ├─ content-core.js
 ├─ content-export.js
 ├─ content-ui.js
@@ -371,6 +428,8 @@ The toolbar popup is still available as a fallback entry point.
   - manages the floating launcher, panel UI, dragging, and page readiness state
 - `content.css`
   - styles the floating launcher, panel, and toasts
+- `ui-tokens.css` / `popup.css`
+  - share light/dark theme values and style the toolbar popup
 - `background.js`
   - fetches cross-origin images
   - provides Base64 payloads for `embed` and `zip`
@@ -382,6 +441,9 @@ The toolbar popup is still available as a fallback entry point.
 - The extension is designed for post detail pages and Note pages. Timeline, search, and profile pages are guidance-only entry points; open a specific post or Note before exporting
 - If X changes its DOM structure significantly, the extraction rules may need updates, but empty exports now fail with a clearer warning instead of silently saving a blank file
 - Most preview cards are handled, but a few complex cards may still be incomplete
+- Thread collection requires loaded posts by the same author plus an explicit reply or thread context; ambiguous adjacency stays out, and complete conversation coverage is not guaranteed
+- Complex tables, mathematical formulas, editor-specific nodes, and some block containers can lose structure; see [the code review](CODE_REVIEW.md)
+- Each `embed` / `zip` export is limited to 500 unique images and 64 MiB of cumulative media bytes; canvas pixels are capped at 8 MP and released after transcode, while measured browser peak memory and real-page queue wait distributions remain future work
 
 ### Privacy
 

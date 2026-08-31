@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.8.0 (2026-09-01)
+
+### 中文
+
+- 品牌更新为 **X帖匣 · Postcase**：浅蓝图标、统一弹窗与悬浮窗，支持明暗主题。
+- 重构界面层级、键盘焦点、拖动定位和结果提示；两入口同步任务进度并锁定冲突操作。
+- 修复时间戳误删正文与引用、图片遗漏、列表顺序和缩进、代码块空白丢失。
+- 收紧目标帖子与文章范围、线程关系判断，改进互动统计与图片 URL 处理。
+- 加入导出媒体预算、跨标签请求排队和背压，改进取消、ZIP 进度及资源释放。
+- 发布新的实际界面截图、品牌源文件和可复现安装包；77 项单元测试、20 项浏览器测试通过。
+- 保留仓库地址、安装包名前缀和已保存设置。此次为 GitHub 发布，Chrome 商店版本未同步。
+
+### English
+
+- Renamed the product to X帖匣 · Postcase, with a light-blue folded-page and storage-case mark, editable SVG source, and 16/32/48/128px icons. Existing settings, repository URLs, and release filenames remain compatible; the store listing has not been changed.
+- Fixed timestamp filtering dropping wrapped bodies and quoted posts, and restored direct and captioned media images.
+- Preserved mixed list content in DOM order, indented ordered-list continuations by marker width, and retained code-block blank lines and trailing whitespace.
+- Reworked the popup and floating panel with shared light/dark colors, compact controls, and a simpler action hierarchy; removed gradients, glass effects, and duplicate in-panel notifications.
+- Added reliable task reconnection, tab-scoped progress, export/diagnostic locking, persistent warnings, safe focus restoration, responsive panel placement, and late-content detection.
+- Fixed target-post identity, quoted-content boundaries, article ownership, avatar card pollution, and image URL parameter handling.
+- Fixed cancellation during clipboard fallback and background fetches; enforce the image byte limit while reading the response stream.
+- Extended the structured document model to preserve wrapper-level paragraphs, headings, blockquotes, code blocks, ordered list starts, and nested lists across all export modes.
+- Matched interaction statistics by semantic labels across native buttons, reordered controls, and common localized count formats.
+- Tightened thread collection to require the same author plus an explicit reply or thread context; ambiguous adjacency now stays out of the export.
+- Added versioned export state messages with task IDs, start timestamps, monotonic revisions, and stale-message rejection across popup reconnections.
+- Added a per-export media budget of 500 unique images and 64 MiB of cumulative media bytes for `embed` / `zip` modes.
+- Added a six-request global image-fetch cap with a cancellable cross-tab queue; navigation and tab close now clear that tab's active and queued requests.
+- Added a 96-entry FIFO backpressure limit; a full queue returns an explicit failure so exports keep the remote image link instead of retaining unbounded callbacks.
+- Added internal queue counters for active depth, high-water mark, completed wait, and rejected requests without collecting page content or sending telemetry.
+- Added ZIP compression progress cancellation checks and released prepared embed data URLs as each image enters the archive; failed prepared images reuse their remote links instead of being fetched twice.
+- Bounded image transcode canvases to 8 MP and cleared their pixel buffers after each conversion.
+- Verify release directories and ZIP entries against the current source whitelist, including file bytes.
+- Expanded regression coverage and documented remaining extraction and resource-budget work in CODE_REVIEW.md and IMPROVEMENT_PLAN.md.
+
 ## v1.7.0 (2026-08-22)
 
 - Hardened page classification and added support for `/i/web/status/{id}` URLs.

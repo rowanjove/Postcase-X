@@ -2,296 +2,58 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body {
-      width: 312px;
-      padding: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #15202b;
-      color: #e7e9ea;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-
-    .header img {
-      width: 34px;
-      height: 34px;
-      border-radius: 10px;
-      flex-shrink: 0;
-    }
-
-    .header h1 {
-      font-size: 15px;
-      font-weight: 700;
-    }
-
-    .status {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      margin-bottom: 14px;
-      font-size: 13px;
-      font-weight: 500;
-    }
-
-    .status.ok { background: rgba(0, 186, 124, 0.15); color: #00ba7c; }
-    .status.no { background: rgba(244, 33, 46, 0.15); color: #f4212e; }
-    .status.loading { background: rgba(29, 155, 240, 0.15); color: #1d9bf0; }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: currentColor;
-      flex-shrink: 0;
-    }
-
-    .status span {
-      min-width: 0;
-      flex: 1;
-    }
-
-    .status-type {
-      flex: 0 0 auto;
-      max-width: 100%;
-      padding: 3px 7px;
-      border-radius: 9999px;
-      background: rgba(255, 255, 255, 0.08);
-      font-size: 11px;
-      font-weight: 700;
-      line-height: 1.2;
-      white-space: nowrap;
-    }
-
-    .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: #71767b;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-
-    .mode-selector {
-      display: flex;
-      gap: 6px;
-      margin-bottom: 14px;
-    }
-
-    .mode-btn {
-      flex: 1;
-      padding: 9px 6px;
-      border: 1px solid #2f3336;
-      border-radius: 10px;
-      background: transparent;
-      color: #8b98a5;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-family: inherit;
-      text-align: center;
-      line-height: 1.35;
-    }
-
-    .mode-btn:hover { border-color: #1d9bf0; color: #1d9bf0; }
-
-    .mode-btn.active {
-      background: rgba(29, 155, 240, 0.15);
-      border-color: #1d9bf0;
-      color: #1d9bf0;
-    }
-
-    .mode-desc {
-      font-size: 11px;
-      color: #71767b;
-      margin-bottom: 12px;
-      padding: 0 2px;
-      line-height: 1.5;
-      min-height: 34px;
-    }
-
-    .meta-note {
-      margin-bottom: 14px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(29, 155, 240, 0.2);
-      background: rgba(29, 155, 240, 0.08);
-      color: #c9d6df;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-
-    .buttons-row {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-
-    .btn {
-      padding: 11px;
-      border: none;
-      border-radius: 9999px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-family: inherit;
-    }
-
-    .btn:active:not(:disabled) { transform: scale(0.97); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .btn-primary {
-      flex: 1;
-      background: #1d9bf0;
-      color: #fff;
-    }
-
-    .btn-primary:hover:not(:disabled) { background: #1a8cd8; }
-
-    .btn-secondary {
-      background: #2f3336;
-      color: #fff;
-      padding: 11px 16px;
-    }
-
-    .btn-secondary:hover:not(:disabled) { background: #3e4144; }
-
-    .progress {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      margin-top: 10px;
-      font-size: 12px;
-      color: #8b98a5;
-      flex-wrap: wrap;
-    }
-
-    .progress.show { display: flex; }
-
-    .spinner {
-      width: 14px;
-      height: 14px;
-      border: 2px solid #2f3336;
-      border-top-color: #1d9bf0;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    .progress span { flex: 1; }
-
-    .progress-bar {
-      order: 4;
-      flex: 0 0 100%;
-      width: 100%;
-      height: 4px;
-      accent-color: #1d9bf0;
-    }
-
-    .progress-bar[hidden] { display: none; }
-
-    .cancel-btn {
-      padding: 4px 8px;
-      border: 0;
-      border-radius: 7px;
-      background: rgba(244, 33, 46, 0.15);
-      color: #ff989f;
-      font: inherit;
-      cursor: pointer;
-    }
-
-    .cancel-btn:disabled { opacity: 0.55; cursor: default; }
-
-    .diagnostic-btn {
-      display: block;
-      margin: -2px 0 10px auto;
-      padding: 2px 0;
-      border: 0;
-      background: transparent;
-      color: #7ea6c7;
-      font: inherit;
-      font-size: 11px;
-      cursor: pointer;
-    }
-
-    .diagnostic-btn:hover:not(:disabled) { color: #9fcfff; text-decoration: underline; }
-    .diagnostic-btn:disabled { opacity: 0.5; cursor: default; }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .result {
-      display: none;
-      text-align: center;
-      margin-top: 10px;
-      font-size: 13px;
-      padding: 8px;
-      border-radius: 8px;
-    }
-
-    .result.success { display: block; background: rgba(0, 186, 124, 0.15); color: #00ba7c; }
-    .result.error { display: block; background: rgba(244, 33, 46, 0.15); color: #f4212e; }
-    .result.warning { display: block; background: rgba(255, 173, 31, 0.15); color: #f5b642; }
-
-    .footer {
-      margin-top: 14px;
-      font-size: 11px;
-      color: #536471;
-      text-align: center;
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X帖匣 · Postcase</title>
+  <link rel="stylesheet" href="ui-tokens.css">
+  <link rel="stylesheet" href="popup.css">
 </head>
-<body>
-  <div class="header">
-    <img src="icons/icon48.png" alt="">
-    <h1 data-i18n="extension_name">X Markdown Exporter</h1>
-  </div>
+<body class="xpd-popup xpd-surface">
+  <header class="header">
+    <img class="header-icon" src="icons/icon48.png" width="32" height="32" alt="">
+    <div class="brand-wordmark">
+      <h1 data-i18n="brand_name">X帖匣 · Postcase</h1>
+      <span class="brand-purpose">X → Markdown</span>
+    </div>
+  </header>
 
   <div class="status loading" id="status" role="status" aria-live="polite">
-    <div class="status-dot"></div>
-    <span data-i18n="checking">检测中...</span>
-    <b class="status-type" id="statusKind" data-i18n="kind_other">其他</b>
+    <span class="status-dot" aria-hidden="true"></span>
+    <span id="statusText" data-i18n="checking">检测中…</span>
+    <span class="status-type" id="statusKind" hidden></span>
   </div>
 
-  <div class="section-title" data-i18n="download_format">下载格式</div>
-  <div class="mode-selector" id="modeSelector" role="group" aria-label="下载格式" data-i18n-aria-label="download_format">
-    <button class="mode-btn" data-mode="link" aria-pressed="false" data-i18n="mode_link">链接引用</button>
-    <button class="mode-btn active" data-mode="embed" aria-pressed="true" data-i18n="mode_embed">内嵌图片</button>
-    <button class="mode-btn" data-mode="zip" aria-pressed="false" data-i18n="mode_zip">ZIP 打包</button>
-  </div>
-  <div class="mode-desc" id="modeDesc" data-i18n="mode_embed_desc">图片压缩后以内嵌方式写入 Markdown，单文件保存更省心。</div>
+  <main>
+    <section class="format-section" aria-labelledby="formatLabel">
+      <h2 id="formatLabel" data-i18n="download_format">下载格式</h2>
+      <div class="mode-selector" id="modeSelector" role="group" aria-label="下载格式" aria-describedby="modeDesc" data-i18n-aria-label="download_format">
+        <button type="button" class="mode-btn" data-mode="link" aria-pressed="false" data-i18n="mode_link">图片链接</button>
+        <button type="button" class="mode-btn active" data-mode="embed" aria-pressed="true" data-i18n="mode_embed">内嵌图片</button>
+        <button type="button" class="mode-btn" data-mode="zip" aria-pressed="false" data-i18n="mode_zip">ZIP 打包</button>
+      </div>
+      <p class="mode-desc" id="modeDesc" data-i18n="mode_embed_desc">图片写入 Markdown，保存为一个文件。</p>
+      <p class="metadata-note" data-i18n="metadata_note">附带作者、时间和原文链接</p>
+    </section>
 
-  <div class="meta-note">
-    <span data-i18n="metadata_note">导出时默认附带作者和时间，界面先保持精简，下载时直接带上。</span>
-  </div>
+    <div class="buttons-row">
+      <button type="button" class="btn btn-primary" id="downloadBtn" disabled data-i18n="download">下载</button>
+      <button type="button" class="btn btn-secondary" id="copyBtn" disabled aria-describedby="copyHint" data-i18n="copy">复制</button>
+    </div>
+    <p class="copy-hint" id="copyHint" data-i18n="copy_link_hint">复制始终使用图片链接。</p>
 
-  <div class="buttons-row">
-    <button class="btn btn-primary" id="downloadBtn" disabled data-i18n="download">下载</button>
-    <button class="btn btn-secondary" id="copyBtn" disabled data-i18n="copy">复制</button>
-    <button class="btn btn-secondary" id="refreshBtn" title="刷新页面" data-i18n="refresh" data-i18n-title="refresh_page">刷新</button>
-  </div>
-  <button class="diagnostic-btn" id="diagnosticBtn" data-i18n="diagnostics_copy">复制诊断报告</button>
+    <div class="progress" id="progress" role="status" aria-live="polite" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="progressText" data-i18n="progress_extracting">正在提取内容…</span>
+      <button type="button" class="cancel-btn" id="cancelBtn" disabled data-i18n="cancel">取消</button>
+      <progress class="progress-bar" id="progressBar" max="1" value="0" hidden></progress>
+    </div>
+    <div class="result" id="result" role="status" aria-live="polite" hidden></div>
+  </main>
 
-  <div class="progress" id="progress" role="status" aria-live="polite">
-    <div class="spinner"></div>
-    <span id="progressText" data-i18n="progress_extracting">正在提取内容...</span>
-    <button class="cancel-btn" id="cancelBtn" data-i18n="cancel">取消</button>
-    <progress class="progress-bar" id="progressBar" max="1" value="0" hidden></progress>
-  </div>
-  <div class="result" id="result" role="status" aria-live="polite"></div>
-
-  <div class="footer" id="versionText"></div>
+  <footer class="footer">
+    <button type="button" class="utility-btn" id="refreshBtn" disabled data-i18n="refresh_page">刷新页面</button>
+    <button type="button" class="utility-btn" id="diagnosticBtn" disabled data-i18n="diagnostics_copy">复制诊断报告</button>
+    <span id="versionText"></span>
+  </footer>
 
   <script src="popup.js"></script>
 </body>

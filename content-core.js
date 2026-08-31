@@ -1,4 +1,4 @@
-// X Markdown Exporter - Core Module
+// Postcase - Core Module
 // Utilities, escaping helpers, and DOM extraction logic.
 
 (function () {
@@ -101,13 +101,10 @@
   // ── URL helpers ────────────────────────────────────────────────────
 
   function upgradeImageUrl(src) {
-    if (src.includes('pbs.twimg.com/media')) {
-      src = src.replace(/&name=\w+/, '&name=large');
-      if (!src.includes('name=')) {
-        src += (src.includes('?') ? '&' : '?') + 'name=large';
-      }
-    }
-    return src;
+    if (!isTweetMediaImage(src)) return src;
+    const parsed = new URL(src);
+    parsed.searchParams.set('name', 'large');
+    return parsed.href;
   }
 
   function normalizeAnchorUrl(href) {
@@ -174,7 +171,22 @@
       if (!block) return '';
       if (block.type === 'paragraph' || block.type === 'heading' ||
           block.type === 'listItem' || block.type === 'blockquote') {
-        return inlineNodesToPlainText(block.inlines);
+        const inlineText = inlineNodesToPlainText(block.inlines);
+        const nestedText = contentBlocksToPlainText(block.blocks);
+        const childText = (block.children || [])
+          .map((child) => contentBlocksToPlainText(child.items || []))
+          .filter(Boolean)
+          .join('\n');
+        return [inlineText, nestedText, childText].filter(Boolean).join('\n');
+      }
+      if (block.type === 'code') {
+        return block.text || '';
+      }
+      if (block.type === 'list') {
+        return (block.items || [])
+          .map((item) => contentBlocksToPlainText([item]))
+          .filter(Boolean)
+          .join('\n');
       }
       if (block.type === 'card') {
         return [block.title, block.summary, block.domain].filter(Boolean).join(' ');
@@ -189,6 +201,14 @@
     return (blocks || []).some((block) => {
       if (block?.type === 'image' || block?.type === 'card') return true;
       if (block?.type === 'quote') return hasMeaningfulContentBlocks(block.blocks);
+      if (block?.type === 'list') {
+        return (block.items || []).some((item) => hasMeaningfulContentBlocks([item]));
+      }
+      if (block?.type === 'code') return Boolean(block.text?.trim());
+      if (block?.blocks?.length || block?.children?.length) {
+        return hasMeaningfulContentBlocks(block.blocks) ||
+          (block.children || []).some((child) => hasMeaningfulContentBlocks(child.items || []));
+      }
       return (block?.inlines || []).some((inline) => inline?.type === 'image');
     });
   }
@@ -235,22 +255,19 @@
   }
 
   function isTweetMediaImage(src) {
-    return Boolean(src && src.includes('pbs.twimg.com/media'));
+    try {
+      const parsed = new URL(src);
+      return parsed.protocol === 'https:' && parsed.hostname === 'pbs.twimg.com' &&
+        parsed.pathname.startsWith('/media/');
+    } catch {
+      return false;
+    }
   }
 
   function createImageNode(src, imageState, alt = '') {
     if (!imageState || !isTweetMediaImage(src)) return null;
 
-    let nextSrc = src;
-    if (
-      nextSrc.includes('profile_images') ||
-      nextSrc.includes('emoji') ||
-      nextSrc.includes('icon')
-    ) {
-      return null;
-    }
-
-    nextSrc = upgradeImageUrl(nextSrc);
+    const nextSrc = upgradeImageUrl(src);
     if (imageState.imageSet.has(nextSrc)) return null;
 
     imageState.imageSet.add(nextSrc);
@@ -291,16 +308,15 @@
     }
   }
 
-  function looksLikeCardDestination(url, rawHref) {
+  function looksLikeCardDestination(url) {
     try {
       const parsed = new URL(url);
       const hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
       if (hostname === 't.co') return true;
       if (hostname === 'x.com' || hostname === 'twitter.com') {
-        return (
-          !/^\/(home|explore|search|messages|notifications|i\/|compose)/i.test(rawHref || '') &&
-          !/\/status\/\d+/i.test(parsed.pathname)
-        );
+        // Profile/avatar links and navigation are not preview cards. Internal
+        // article links are the only supported X destinations for a card.
+        return ARTICLE_DETAIL_PATH_RE.test(parsed.pathname);
       }
       return true;
     } catch {
@@ -336,12 +352,13 @@
     if (!(anchor instanceof Element)) return false;
     if (anchor.closest(dom.css.tweetText)) return false;
     if (anchor.closest(dom.css.author)) return false;
+    if (anchor.closest(dom.css.authorAvatar)) return false;
     if (anchor.closest(dom.css.actionGroup)) return false;
     if (anchor.querySelector('time')) return false;
 
     const rawHref = anchor.getAttribute('href') || anchor.href || '';
     const url = normalizeAnchorUrl(rawHref);
-    if (!url || !looksLikeCardDestination(url, rawHref)) return false;
+    if (!url || !looksLikeCardDestination(url)) return false;
 
     const texts = collectPreviewCardTexts(anchor);
     const hasMedia = Boolean(anchor.querySelector('img, video'));
@@ -372,6 +389,96 @@
 
   // ── DOM text walking ───────────────────────────────────────────────
 
+  function isElementNode(node) {
+    return node?.nodeType === Node.ELEMENT_NODE;
+  }
+
+  function matchesElement(node, selector) {
+    return isElementNode(node) && typeof node.matches === 'function' && node.matches(selector);
+  }
+
+  function isExcludedContentElement(node) {
+    if (!isElementNode(node)) return false;
+    if (
+      matchesElement(node, dom.css.author) ||
+      matchesElement(node, dom.css.authorAvatar) ||
+      matchesElement(node, dom.css.actionGroup) ||
+      matchesElement(node, dom.css.time)
+    ) {
+      return true;
+    }
+    // A timestamp is commonly wrapped in a permalink anchor. It is metadata,
+    // not a paragraph or a preview card.
+    return matchesElement(node, 'a') && Boolean(node.querySelector?.(dom.css.time));
+  }
+
+  function isSemanticBlockElement(node) {
+    if (!isElementNode(node)) return false;
+    const tag = node.tagName.toLowerCase();
+    if (/^h[1-6]$/.test(tag)) return true;
+    if (['p', 'li', 'blockquote', 'pre', 'ul', 'ol', 'figure', 'article'].includes(tag)) {
+      return true;
+    }
+    if (tag !== 'div') return false;
+    return (
+      matchesElement(node, 'div[lang]') ||
+      matchesElement(node, 'div[data-block="true"]') ||
+      matchesElement(node, dom.css.tweetText) ||
+      matchesElement(node, dom.css.tweetPhotoImage.replace(' img', '')) ||
+      matchesElement(node, dom.css.articleContent)
+    );
+  }
+
+  function hasBlockDescendant(node, seen = new Set()) {
+    if (!isElementNode(node) || seen.has(node)) return false;
+    seen.add(node);
+    for (const child of Array.from(node.childNodes || [])) {
+      if (!isElementNode(child) || isExcludedContentElement(child)) continue;
+      if (isSemanticBlockElement(child)) return true;
+      if (matchesElement(child, 'a[href]') && isPreviewCardAnchor(child)) return true;
+      if (hasBlockDescendant(child, seen)) return true;
+    }
+    return false;
+  }
+
+  function isBlockBoundary(node) {
+    if (!isElementNode(node) || isExcludedContentElement(node)) return false;
+    if (isSemanticBlockElement(node)) return true;
+    if (matchesElement(node, 'a[href]')) return isPreviewCardAnchor(node);
+    const tag = node.tagName.toLowerCase();
+    return ['div', 'section', 'main'].includes(tag) && hasBlockDescendant(node);
+  }
+
+  function trimInlineBoundaries(inlines) {
+    const result = (inlines || []).filter((inline) => inline?.type !== 'text' || inline.text);
+    if (result[0]?.type === 'text') result[0].text = result[0].text.trimStart();
+    const last = result[result.length - 1];
+    if (last?.type === 'text') last.text = last.text.trimEnd();
+    return result.filter((inline) => inline.type !== 'text' || inline.text);
+  }
+
+  function appendInlineNodes(target, nodes) {
+    for (const node of nodes || []) appendInlineNode(target, node);
+  }
+
+  function appendParagraph(blocks, inlines) {
+    const normalized = trimInlineBoundaries(inlines);
+    if (normalized.length) blocks.push({ type: 'paragraph', inlines: normalized });
+  }
+
+  function appendDirectInlineNode(inlines, node, imageState) {
+    if (node?.nodeType === Node.TEXT_NODE) {
+      appendInlineNode(inlines, { type: 'text', text: node.textContent || '' });
+      return;
+    }
+    if (isElementNode(node)) {
+      appendInlineNodes(inlines, extractInlineNodes(node, imageState, {
+        includeRoot: true,
+        trimBoundaries: false,
+      }));
+    }
+  }
+
   function appendInlineNode(inlines, node) {
     if (!node) return;
     if (node.type === 'text' && !node.text) return;
@@ -383,16 +490,19 @@
     inlines.push(node);
   }
 
-  function extractInlineNodes(el, imageState) {
+  function extractInlineNodes(el, imageState, options = {}) {
     if (!el) return [];
     const inlines = [];
+    const skipNestedBlocks = options.skipNestedBlocks === true;
 
-    const walk = (node) => {
+    const walk = (node, isRoot = false) => {
       if (node.nodeType === Node.TEXT_NODE) {
         appendInlineNode(inlines, { type: 'text', text: node.textContent || '' });
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) return;
+      if (isExcludedContentElement(node)) return;
+      if (!isRoot && skipNestedBlocks && isBlockBoundary(node)) return;
       const tag = node.tagName.toLowerCase();
 
       if (tag === 'br') {
@@ -400,6 +510,12 @@
         return;
       }
       if (tag === 'a') {
+        // Photo links own media, not just a text label. Walk their contents so
+        // including an anchor itself never replaces its image with an empty link.
+        if (node.querySelector?.(dom.css.mediaImage)) {
+          Array.from(node.childNodes || []).forEach((child) => walk(child));
+          return;
+        }
         const href = node.getAttribute('href') || '';
         const linkText = node.textContent.trim();
         const normalizedUrl = normalizeAnchorUrl(href);
@@ -422,10 +538,12 @@
         }
         return;
       }
-      node.childNodes.forEach(walk);
+      Array.from(node.childNodes || []).forEach((child) => walk(child));
     };
 
-    el.childNodes.forEach(walk);
+    if (options.includeRoot) walk(el, true);
+    else Array.from(el.childNodes || []).forEach((child) => walk(child));
+    if (options.trimBoundaries === false) return inlines;
     if (inlines[0]?.type === 'text') inlines[0].text = inlines[0].text.trimStart();
     const last = inlines[inlines.length - 1];
     if (last?.type === 'text') last.text = last.text.trimEnd();
@@ -484,7 +602,7 @@
     };
   }
 
-  function extractRichContent(container, imageOffset = 0, options = {}) {
+  function extractRichContentFromCandidates(container, imageOffset = 0, options = {}) {
     const includeQuotedTweets = options.includeQuotedTweets !== false;
     const blocks = [];
     const images = [];
@@ -548,14 +666,190 @@
     return { blocks, images };
   }
 
-  function detectArticlePage() {
-    const articleContainers = getArticleContainers();
-    if (articleContainers.length === 0) return false;
+  function extractCodeBlock(element) {
+    const text = String(element?.textContent || '').replace(/\r\n?/g, '\n');
+    if (!text.trim()) return null;
+    const className = typeof element.className === 'string' ? element.className : '';
+    const nestedCode = element.querySelector?.('code');
+    const nestedClassName = typeof nestedCode?.className === 'string'
+      ? nestedCode.className
+      : '';
+    const language = `${className} ${nestedClassName}`
+      .match(/(?:^|\s)language-([\w-]+)/i)?.[1] || '';
+    return { type: 'code', language, text };
+  }
 
-    // Rich-text containers also occur in composers and timeline UI. Only
-    // accept them on an explicit status/article detail route.
-    const route = classifyPageRoute();
-    return route.kind === 'tweet' || route.kind === 'article';
+  function extractListItem(element, imageState, options) {
+    // Keep every paragraph, nested list and code block in DOM order. Separate
+    // inline/child buckets cannot represent text following a nested list.
+    return {
+      type: 'listItem',
+      blocks: extractStructuredBlocks(element, imageState, options),
+    };
+  }
+
+  function collectListItems(listElement, result = []) {
+    for (const child of Array.from(listElement.childNodes || [])) {
+      if (!isElementNode(child)) continue;
+      const tag = child.tagName.toLowerCase();
+      if (tag === 'li') {
+        result.push(child);
+      } else if (tag !== 'ul' && tag !== 'ol') {
+        collectListItems(child, result);
+      }
+    }
+    return result;
+  }
+
+  function extractListBlock(element, imageState, options) {
+    const tag = element.tagName.toLowerCase();
+    const items = collectListItems(element).map((item) =>
+      extractListItem(item, imageState, options)
+    );
+    if (!items.length) return null;
+
+    const rawStart = element.getAttribute?.('start');
+    const parsedStart = Number.parseInt(rawStart, 10);
+    return {
+      type: 'list',
+      ordered: tag === 'ol',
+      start: tag === 'ol' && Number.isInteger(parsedStart) ? parsedStart : 1,
+      items,
+    };
+  }
+
+  function extractElementAsBlocks(element, imageState, options) {
+    if (!isElementNode(element) || isExcludedContentElement(element)) return [];
+    const tag = element.tagName.toLowerCase();
+
+    if (tag === 'article' && matchesElement(element, dom.css.tweetArticle)) {
+      if (options.includeQuotedTweets === false) return [];
+      const quotedTweet = extractQuotedTweetBlock(element, imageState.imgIndex);
+      if (!quotedTweet.block) return [];
+      for (const image of quotedTweet.images) {
+        if (!imageState.imageSet.has(image)) {
+          imageState.imageSet.add(image);
+          imageState.images.push(image);
+        }
+      }
+      imageState.imgIndex = imageState.imageOffset + imageState.images.length;
+      return [quotedTweet.block];
+    }
+
+    if (tag === 'a') {
+      const card = extractPreviewCard(element, options.seenCardLinks);
+      return card ? [card] : [];
+    }
+
+    if (tag === 'img') {
+      const imageNode = createImageNode(
+        element.getAttribute('src') || element.src,
+        imageState,
+        element.getAttribute('alt') || ''
+      );
+      return imageNode ? [imageNode] : [];
+    }
+
+    if (tag === 'ul' || tag === 'ol') {
+      const list = extractListBlock(element, imageState, options);
+      return list ? [list] : [];
+    }
+
+    if (tag === 'li') return [extractListItem(element, imageState, options)];
+
+    if (tag === 'pre') {
+      const code = extractCodeBlock(element);
+      return code ? [code] : [];
+    }
+
+    // Paragraph-like nodes own their inline whitespace. Images and links stay
+    // in the paragraph instead of being promoted to neighboring blocks.
+    const inlineOnly =
+      tag === 'p' || /^h[1-6]$/.test(tag) ||
+      matchesElement(element, 'div[lang]') ||
+      matchesElement(element, dom.css.tweetText);
+    if (inlineOnly) {
+      const inlines = extractInlineNodes(element, imageState);
+      if (!inlines.length) return [];
+      return [{
+        type: /^h[1-6]$/.test(tag) ? 'heading' : 'paragraph',
+        ...(tag.match(/^h([1-6])$/) ? { level: Number(tag.slice(1)) } : {}),
+        inlines,
+      }];
+    }
+
+    if (tag === 'blockquote') {
+      const nested = extractStructuredBlocks(element, imageState, options);
+      if (nested.length) return [{ type: 'blockquote', blocks: nested }];
+      const inlines = extractInlineNodes(element, imageState);
+      return inlines.length ? [{ type: 'blockquote', inlines }] : [];
+    }
+
+    const nested = extractStructuredBlocks(element, imageState, options);
+    if (nested.length) return nested;
+
+    const inlines = extractInlineNodes(element, imageState);
+    if (!inlines.length) return [];
+    return [{ type: 'paragraph', inlines }];
+  }
+
+  function extractStructuredBlocks(container, imageState, options) {
+    const blocks = [];
+    const pendingInlines = [];
+    const flushPending = () => {
+      appendParagraph(blocks, pendingInlines.splice(0));
+    };
+
+    for (const child of Array.from(container.childNodes || [])) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        appendInlineNode(pendingInlines, { type: 'text', text: child.textContent || '' });
+        continue;
+      }
+      if (!isElementNode(child) || isExcludedContentElement(child)) continue;
+
+      if (isBlockBoundary(child)) {
+        flushPending();
+        blocks.push(...extractElementAsBlocks(child, imageState, options));
+      } else {
+        appendDirectInlineNode(pendingInlines, child, imageState);
+      }
+    }
+    flushPending();
+    return blocks;
+  }
+
+  function extractRichContent(container, imageOffset = 0, options = {}) {
+    // Unit fixtures from older selector adapters may only provide
+    // querySelectorAll(). Keep their behavior while real DOM nodes use the
+    // recursive block model above.
+    if (!container?.childNodes) {
+      return extractRichContentFromCandidates(container, imageOffset, options);
+    }
+
+    const images = [];
+    const imageState = {
+      images,
+      imageSet: new Set(),
+      imageOffset,
+      imgIndex: imageOffset,
+    };
+    const structuredOptions = {
+      includeQuotedTweets: options.includeQuotedTweets !== false,
+      seenCardLinks: new Set(),
+    };
+    const blocks = extractStructuredBlocks(container, imageState, structuredOptions);
+    return { blocks, images };
+  }
+
+  function detectArticlePage() {
+    return getArticleContext().containers.length > 0;
+  }
+
+  function isInsideQuotedContent(element, article) {
+    // A quoted post can be a clickable div rather than a nested article.
+    // Start at the parent: a permalink anchor may itself have role="link".
+    const quote = element.parentElement?.closest(dom.css.quotedContent);
+    return Boolean(quote && quote !== article && quote.closest(dom.css.tweetArticle) === article);
   }
 
   function getMainTweet() {
@@ -565,13 +859,50 @@
     const articles = getTopLevelTweetArticles();
 
     for (const article of articles) {
-      const links = article.querySelectorAll(`a[href*="/status/${statusId}"]`);
+      const links = article.querySelectorAll('a[href]');
       for (const link of links) {
-        if (link.querySelector('time')) return article;
+        if (link.closest(dom.css.tweetArticle) !== article || !link.querySelector('time') ||
+            link.closest(dom.css.tweetText) || isInsideQuotedContent(link, article)) {
+          continue;
+        }
+        const href = normalizeAnchorUrl(link.getAttribute('href') || '');
+        const permalink = classifyPageRoute(href);
+        if (permalink.kind !== 'tweet') continue;
+        if (permalink.statusId === statusId) return article;
+        // The first self-owned timestamp identifies this post. A later link
+        // to the target cannot turn another post into the current one.
+        break;
       }
     }
     // Do not silently export an unrelated article when X changes its DOM.
     return null;
+  }
+
+  function getArticleContext() {
+    const empty = { containers: [], owner: null };
+    const route = classifyPageRoute();
+    if (route.kind === 'tweet') {
+      const owner = getMainTweet();
+      if (!owner) return empty;
+      const containers = getArticleContainers(owner).filter((container) =>
+        container.closest(dom.css.tweetArticle) === owner &&
+        !isInsideQuotedContent(container, owner) &&
+        !container.closest(dom.css.editableContent)
+      );
+      return { containers, owner };
+    }
+    if (route.kind !== 'article') return empty;
+
+    const primaryColumn = document.querySelector(dom.css.primaryColumn);
+    const candidates = getArticleContainers(primaryColumn || document).filter(
+      (container) => !container.closest(dom.css.editableContent)
+    );
+    const explicitBodies = candidates.filter((container) => container.matches(dom.css.articleBody));
+    // A generic rich-text container is only useful within the article's main
+    // column. Multiple standalone bodies are ambiguous: never concatenate them.
+    const containers = explicitBodies.length ? explicitBodies : primaryColumn ? candidates : [];
+    if (containers.length !== 1) return empty;
+    return { containers, owner: containers[0].closest(dom.css.tweetArticle) };
   }
 
   function extractAuthorInfo(tweetEl) {
@@ -611,26 +942,85 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }
 
+  function classifyStatButton(button) {
+    const label = [
+      button.getAttribute?.('aria-label'),
+      button.getAttribute?.('title'),
+      button.textContent,
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (/(reply|repl(?:y|ies)|comment|回复|评论)/i.test(label)) return 'replies';
+    if (/(repost|retweet|转发)/i.test(label)) return 'retweets';
+    if (/(like|likes|favorite|favourite|喜欢|点赞|赞)/i.test(label)) return 'likes';
+    return null;
+  }
+
+  function extractStatValue(button) {
+    const raw = [
+      button.getAttribute?.('aria-label'),
+      button.getAttribute?.('title'),
+      button.textContent,
+    ].filter(Boolean).join(' ');
+    const match = raw.match(/(?:^|[^\d])([\d]+(?:[.,]\d+)?\s*(?:[KMB]|万|亿)?)(?=$|[^\d])/i);
+    return match ? match[1].replace(/\s+/g, '') : '';
+  }
+
   function extractStats(tweetEl) {
     const stats = { replies: '0', retweets: '0', likes: '0' };
-    const actionGroup = tweetEl.querySelector(dom.css.actionGroup);
+    const actionGroup = tweetEl.querySelector(dom.css.actionGroup) ||
+      tweetEl.querySelector('[role="group"]');
     if (!actionGroup) return stats;
     const buttons = actionGroup.querySelectorAll(dom.css.actionButton);
-    const labels = ['replies', 'retweets', 'likes'];
-    buttons.forEach((btn, idx) => {
-      if (idx >= labels.length) return;
-      const ariaLabel = btn.getAttribute('aria-label') || '';
-      const matchedNumber = ariaLabel.match(/[\d,.]+[KkMm]?/);
-      if (matchedNumber) {
-        stats[labels[idx]] = matchedNumber[0];
-        return;
-      }
-      const span = btn.querySelector('span span');
-      if (span && span.textContent.trim()) {
-        stats[labels[idx]] = span.textContent.trim();
+    const unclassified = [];
+    let classifiedCount = 0;
+    buttons.forEach((button) => {
+      const value = extractStatValue(button);
+      const stat = classifyStatButton(button);
+      if (stat) {
+        classifiedCount += 1;
+        if (value) stats[stat] = value;
+      } else if (value) {
+        unclassified.push(value);
       }
     });
+
+    // Older markup exposed no semantic labels. Positional fallback is kept
+    // only when every candidate is unclassified, so a reordered modern group
+    // cannot silently swap fields.
+    if (classifiedCount === 0) {
+      ['replies', 'retweets', 'likes'].forEach((stat, index) => {
+        if (unclassified[index]) stats[stat] = unclassified[index];
+      });
+    }
     return stats;
+  }
+
+  function getThreadContextText(article) {
+    if (!article?.querySelectorAll) return '';
+    const nodes = [];
+    try {
+      nodes.push(...article.querySelectorAll(dom.css.socialContext));
+      nodes.push(...article.querySelectorAll('[aria-label]'));
+    } catch {
+      return '';
+    }
+    return nodes
+      .map((node) => [node.getAttribute?.('aria-label'), node.textContent].filter(Boolean).join(' '))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function hasVerifiedThreadRelation(article, authorHandle) {
+    const context = getThreadContextText(article);
+    if (!context) return false;
+    if (/(show|view)\s+(?:this\s+)?thread|显示此(?:线程|串)|查看此(?:线程|串)/i.test(context)) {
+      return true;
+    }
+    if (!/(replying\s+to|in\s+reply\s+to|回复|回覆)/i.test(context)) return false;
+    const target = String(authorHandle || '').replace(/^@/, '').toLowerCase();
+    if (!target) return false;
+    return [...context.matchAll(/@([a-z0-9_]{1,15})/gi)]
+      .some((match) => match[1].toLowerCase() === target);
   }
 
   function extractThreadTweets(mainTweetEl) {
@@ -644,6 +1034,9 @@
       const article = allArticles[i];
       const nextAuthor = extractAuthorInfo(article);
       if (nextAuthor.handle === author.handle && nextAuthor.handle !== '@unknown') {
+        // Same-author adjacency is not enough: timeline inserts and replies
+        // can look identical. Require an explicit X thread/reply context.
+        if (!hasVerifiedThreadRelation(article, author.handle)) break;
         const extracted = extractRichContent(article);
         if (!hasMeaningfulContentBlocks(extracted.blocks) && extracted.images.length === 0) break;
         tweets.push(extracted);
@@ -661,15 +1054,14 @@
     let author = { displayName: 'Unknown', handle: '@unknown' };
     let time = null;
 
-    const firstArticle = getTopLevelTweetArticles()[0];
-    if (firstArticle) {
-      author = extractAuthorInfo(firstArticle);
-      time = extractTime(firstArticle);
+    const { containers, owner } = getArticleContext();
+    if (owner) {
+      author = extractAuthorInfo(owner);
+      time = extractTime(owner);
     }
 
-    const knownContainers = getArticleContainers();
-    if (knownContainers.length > 0) {
-      for (const container of knownContainers) {
+    if (containers.length > 0) {
+      for (const container of containers) {
         const extracted = extractRichContent(container, images.length);
         blocks.push(...extracted.blocks);
         images.push(...extracted.images);
@@ -711,7 +1103,13 @@
       for (const inline of block?.inlines || []) {
         if (inline?.type === 'image' && inline.url) urls.push(inline.url);
       }
-      if (block?.type === 'quote') collectImageUrlsFromBlocks(block.blocks, urls);
+      if (block?.blocks) collectImageUrlsFromBlocks(block.blocks, urls);
+      for (const item of block?.items || []) {
+        collectImageUrlsFromBlocks([item], urls);
+      }
+      for (const child of block?.children || []) {
+        collectImageUrlsFromBlocks(child.items || [], urls);
+      }
     }
     return urls;
   }
@@ -724,7 +1122,7 @@
       throw new ExtractionError('DOCUMENT_EMPTY', buildExtractionFailureMessage(input?.kind));
     }
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind: input?.kind === 'article' ? 'article' : 'tweet',
       title: String(input?.title || deriveTitleFromBlocks(blocks)),
       author: input?.author || { displayName: 'Unknown', handle: '@unknown' },
@@ -842,11 +1240,14 @@
     GITHUB_ISSUES_URL,
     detectArticlePage,
     getMainTweet,
+    getArticleContext,
+    isPreviewCardAnchor,
     extractArticle,
     extractRichContent,
     extractAuthorInfo,
     extractTime,
     extractStats,
+    hasVerifiedThreadRelation,
     extractThreadTweets,
     extractComments,
     makeFilename,
