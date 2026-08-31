@@ -1,10 +1,10 @@
 {
   "name": "x-markdown-exporter",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
   "description": "Local quality checks and release tooling for Postcase (formerly X Markdown Exporter).",
   "scripts": {
-    "check:syntax": "node --check background.js && node --check content-selectors.js && node --check content-core.js && node --check content-export.js && node --check content-ui.js && node --check content.js && node --check popup.js && node --check scripts/package-release.js && node --check scripts/verify-release.js && node --check scripts/test-reproducible-release.js && node --check tests/browser/fixture-server.js && node --check tests/browser/fixture.spec.js && node --check tests/browser/popup-fixture.js && node --check tests/browser/popup.spec.js && node --check tests/browser/extension.spec.js && node --check playwright.config.js && node --check scripts/generate-brand-assets.js && node --check scripts/capture-previews.js",
+    "check:syntax": "node --check background.js && node --check content-selectors.js && node --check content-core.js && node --check content-export.js && node --check content-ui.js && node --check content.js && node --check popup.js && node --check scripts/package-release.js && node --check scripts/verify-release.js && node --check scripts/test-reproducible-release.js && node --check tests/browser/fixture-server.js && node --check tests/browser/fixture.spec.js && node --check tests/browser/popup-fixture.js && node --check tests/browser/popup.spec.js && node --check tests/browser/extension.spec.js && node --check playwright.config.js && node --check scripts/generate-brand-assets.js && node --check scripts/capture-previews.js && node --check scripts/manifest-text.js",
     "test": "node --test tests/*.test.js",
     "test:browser": "playwright test",
     "check": "npm run check:syntax && npm test",

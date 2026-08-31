@@ -18,9 +18,17 @@ English: Save X (Twitter) posts, threads, and articles as Markdown. Copy text, e
 
 ## 最新更新 / Latest Update
 
+### v1.8.1 · 2026-09-01
+
+[下载最新版 v1.8.1 / Download](https://github.com/rowanjove/x-markdown-exporter/releases/tag/v1.8.1)
+
+修复商店上传时英文描述超过 132 字符的问题，并加入所有语言的长度预检。请使用 v1.8.1 ZIP 上传。
+
+Fixes the English manifest description upload limit and adds per-locale preflight validation. Use the v1.8.1 ZIP.
+
 ### v1.8.0 · 2026-09-01
 
-[下载 v1.8.0 / Download](https://github.com/rowanjove/x-markdown-exporter/releases/tag/v1.8.0)
+[下载最新版 v1.8.1 / Download](https://github.com/rowanjove/x-markdown-exporter/releases/tag/v1.8.1)
 
 - 新名称 **X帖匣 · Postcase**，浅蓝图标，提供 16/32/48/128px 图标及 SVG 源文件。
 
@@ -52,7 +60,7 @@ English summary: localization, safer structured extraction, cancellable image ex
 
 <img src="assets/popup-preview.png" alt="中文浅色弹窗" width="340"> <img src="assets/popup-dark-preview.png" alt="中文深色弹窗" width="340">
 
-<img src="assets/release-preview.png" alt="v1.8.0 浅色、深色和悬浮窗实际界面" width="960">
+<img src="assets/release-preview.png" alt="v1.8.1 浅色、深色和悬浮窗实际界面" width="960">
 
 截图使用本地匿名示例数据；可运行 `npm run screenshots` 重拍。
 
@@ -137,7 +145,7 @@ Markdown 和图片分开保存，再打包成 ZIP。
 #### 方式二：从 GitHub Releases 下载
 
 1. 打开 [Releases](https://github.com/rowanjove/x-markdown-exporter/releases)
-2. 下载最新版本里的 `x-markdown-exporter-v1.8.0.zip`
+2. 下载最新版本里的 `x-markdown-exporter-v1.8.1.zip`
 3. 解压 ZIP 文件
 4. 打开扩展管理页
    Chrome: `chrome://extensions/`
@@ -363,7 +371,7 @@ Best for:
 #### Option 2: Download from GitHub Releases
 
 1. Open [Releases](https://github.com/rowanjove/x-markdown-exporter/releases)
-2. Download `x-markdown-exporter-v1.8.0.zip`
+2. Download `x-markdown-exporter-v1.8.1.zip`
 3. Extract the ZIP file
 4. Open the extensions page
    Chrome: `chrome://extensions/`

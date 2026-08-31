@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const JSZip = require('../jszip.min.js');
+const { verifyLocalizedManifestText } = require('./manifest-text');
 
 const projectRoot = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'manifest.json'), 'utf8'));
@@ -41,6 +42,13 @@ function collectReleaseSourceFiles() {
 }
 
 function verifySourceMetadata() {
+  const localeRoot = path.join(projectRoot, '_locales');
+  const locales = Object.fromEntries(fs.readdirSync(localeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => [entry.name, JSON.parse(fs.readFileSync(
+      path.join(localeRoot, entry.name, 'messages.json'), 'utf8'
+    ))]));
+  verifyLocalizedManifestText(manifest, locales);
   if (!/^\d+(?:\.\d+){0,3}$/.test(manifest.version)) {
     throw new Error(`Manifest version is not Chrome-compatible: ${manifest.version}`);
   }

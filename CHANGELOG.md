@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.8.1 (2026-09-01)
+
+### 中文
+
+- 修复 Chrome 商店拒绝上传：英文描述原为 133 个字符，超过 132 字符上限；现已缩短。
+- 发布和打包前逐语言校验清单名称与描述的实际翻译长度，补充边界回归测试。
+- 更新版本号和实际界面截图。扩展功能及已有设置不变。
+
+### English
+
+- Shortened the English manifest description to fix Chrome Web Store's 132-character upload limit.
+- Added per-locale validation of resolved manifest name/description lengths before packaging, with boundary regression tests.
+- Updated the patch version and screenshots; export behavior and saved settings are unchanged.
+
 ## v1.8.0 (2026-09-01)
 
 ### 中文
