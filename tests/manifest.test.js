@@ -4,6 +4,26 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { projectRoot } = require('./helpers/load-extension-module');
+const { verifyLocalizedManifestText } = require('../scripts/manifest-text');
+
+test('store text limits apply to each resolved locale with default fallback', () => {
+  const manifest = { default_locale: 'en', name: '__MSG_title__', description: '__MSG_description__' };
+  const locales = { en: { title: { message: 'n'.repeat(75) }, description: { message: 'd'.repeat(132) } }, zh_CN: {} };
+  assert.doesNotThrow(() => verifyLocalizedManifestText(manifest, locales));
+  locales.zh_CN.description = { message: '字'.repeat(133) };
+  assert.throws(() => verifyLocalizedManifestText(manifest, locales), /Locale zh_CN: manifest description is 133 characters; maximum 132/);
+  locales.zh_CN.description.message = '字'.repeat(132);
+  locales.en.title.message += 'n';
+  assert.throws(() => verifyLocalizedManifestText(manifest, locales), /manifest name is 76 characters; maximum 75/);
+});
+
+test('every shipped locale fits the Chrome Web Store manifest text limits', () => {
+  const manifest = require('../manifest.json');
+  const locales = Object.fromEntries(fs.readdirSync(path.join(projectRoot, '_locales')).map((locale) => [
+    locale, JSON.parse(fs.readFileSync(path.join(projectRoot, '_locales', locale, 'messages.json'), 'utf8')),
+  ]));
+  assert.doesNotThrow(() => verifyLocalizedManifestText(manifest, locales));
+});
 
 test('manifest and package versions stay synchronized', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'manifest.json'), 'utf8'));

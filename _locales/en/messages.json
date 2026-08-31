@@ -1,7 +1,7 @@
 {
   "extension_name": { "message": "X帖匣 · Postcase" },
   "brand_name": { "message": "X帖匣 · Postcase" },
-  "extension_description": { "message": "Save X (Twitter) posts, threads, and articles as Markdown. Copy text or download with image links, embedded images, or a ZIP archive." },
+  "extension_description": { "message": "Save X posts, threads, and articles as Markdown. Copy text, embed images, or download a ZIP." },
   "launcher_title": { "message": "X帖匣 · Postcase, drag to move" },
   "panel_subtitle": { "message": "Save the current post or Note" },
   "download_format": { "message": "Export format" },
