@@ -50,8 +50,6 @@ cd x-markdown-exporter
 
 内嵌文件过大时可切换 ZIP。无法获取的图片可能保留远程链接，因此归档后仍应检查图片是否完整。
 
-![Postcase Markdown 导出示例](assets/export-example.png)
-
 ## 功能与限制
 
 - 使用结构化文档模型保留文本、图片、引用和链接卡片的顺序。
